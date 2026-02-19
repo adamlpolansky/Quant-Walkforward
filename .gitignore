@@ -1,0 +1,13 @@
+# venv
+.venv/
+
+# python junk
+__pycache__/
+*.pyc
+
+# pycharm
+.idea/
+
+# outputs/data (volitelné)
+data/
+outputs/
