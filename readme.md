@@ -10,8 +10,31 @@ Build a small but solid research framework that:
 
 This is meant to be the foundation for later work with options data, implied volatility surfaces, and eventually **Heston calibration**.
 
+## Project layout
+
+```text
+Quant-Walkforward/
+  src/
+    qwf/
+      data.py              # data loading helpers
+      splits.py            # walk-forward plan generator
+      backtest.py          # signal + backtest core (no I/O)
+      metrics.py           # fold summary metrics
+      __init__.py
+  scripts/
+    pull_data.py           # (optional) data pull
+    rolling_splits.py      # generates walkforward plan CSV
+    backtest_run.py        # runs walk-forward backtest + saves outputs
+    data/                  # input CSVs (e.g., SPY.csv)
+    splits_train_test/     # generated plan CSVs
+  outputs/
+    ...                    # test_detail / fold_summary / config
+```
+
 ## Current status
 - ✅ Day 1: environment + data download + basic preprocessing (SPY)
+- ✅ Day 2: walk-forward split planner (calendar months → last trading day), saved as plan CSV
+- ✅ Day 3: Z-score mean reversion signal + backtest core on `ret` (lagged position), basic metrics export
 
 ## Planned milestones
 - Week 1: Walk-forward engine + metrics + leakage tests
