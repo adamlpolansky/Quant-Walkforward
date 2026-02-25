@@ -1,13 +1,18 @@
-# venv
-.venv/
-
-# python junk
+# Python
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+.pytest_cache/
 
-# pycharm
+# Virtual env
+.venv/
+venv/
+
+# IDE
 .idea/
+.vscode/
 
-# outputs/data (volitelné)
-data/
+# Outputs / generated files
 outputs/
+scripts/data/*.xlsx

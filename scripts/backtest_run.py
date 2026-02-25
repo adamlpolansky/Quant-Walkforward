@@ -10,6 +10,7 @@ import pandas as pd
 
 from qwf.backtest import ZScoreMRConfig, run_wf_backtest_ret
 from qwf import metrics
+from qwf.reporting.plots import save_report_plots
 
 ROOT = Path(__file__).resolve().parents[1]  # ✅ FIX: define ROOT
 
@@ -131,6 +132,16 @@ def main() -> None:
     cfg_path.write_text(json.dumps(meta, indent=2, default=str), encoding="utf-8")
 
     print(f"✅ Saved:\n- {test_path}\n- {sum_path}\n- {cfg_path}")
+    plots_dir = args.out_dir / "plots" / args.run_name
+    save_report_plots(
+        test_detail=test_detail,
+        fold_summary=fold_summary,
+        out_dir=plots_dir,
+        run_name=args.run_name,
+        rolling_sharpe_window=63,
+        save_per_fold_equity=True,  # když dáš True, uloží i per-fold pngčka
+    )
+    print(f"📈 Plots saved to: {plots_dir}")
 
 
 if __name__ == "__main__":

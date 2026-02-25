@@ -274,6 +274,14 @@ def run_wf_backtest_ret(
         if "source_file" in plan_used.columns:
             test_bt["source_file"] = row.get("source_file", np.nan)
 
+        # Recompute fold-local equity/cum_pnl on TEST rows only
+        # (pos_lag is already correct because signal/backtest were computed on train+test)
+        pnl_local = pd.to_numeric(test_bt["pnl"], errors="coerce").astype(float)
+        pnl_filled = pnl_local.fillna(0.0)
+
+        test_bt["cum_pnl"] = pnl_filled.cumsum()
+        test_bt["equity"] = (1.0 + pnl_filled).cumprod()
+
         test_details.append(test_bt)
 
     test_detail = pd.concat(test_details, axis=0)

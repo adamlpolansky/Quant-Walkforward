@@ -1,0 +1,59 @@
+Metadata-Version: 2.4
+Name: quant-walkforward
+Version: 0.1.0
+Summary: Small walk-forward quant research framework
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: pandas
+Requires-Dist: numpy
+Requires-Dist: yfinance
+Requires-Dist: matplotlib
+
+# Quant Walk-Forward (first project)
+
+Hi! This is my first ever quant project on my journey to become a strong quant researcher/developer.
+
+## Goal
+Build a small but solid research framework that:
+- downloads market data (initially via `yfinance`)
+- runs **walk-forward** evaluation with rolling **train/test splits** (e.g. 12M train → 1M test)
+- includes **anti-leakage guardrails** (strict time indexing, lag-only features, no lookahead)
+
+This is meant to be the foundation for later work with options data, implied volatility surfaces, and eventually **Heston calibration**.
+
+## Project layout
+
+```text
+Quant-Walkforward/
+  src/
+    qwf/
+      data.py              # data loading helpers
+      splits.py            # walk-forward plan generator
+      backtest.py          # signal + backtest core (no I/O)
+      metrics.py           # fold summary metrics
+      __init__.py
+  scripts/
+    pull_data.py           # (optional) data pull
+    rolling_splits.py      # generates walkforward plan CSV
+    backtest_run.py        # runs walk-forward backtest + saves outputs
+    data/                  # input CSVs (e.g., SPY.csv)
+    splits_train_test/     # generated plan CSVs
+  outputs/
+    ...                    # test_detail / fold_summary / config
+```
+
+## Current status
+- ✅ Day 1: environment + data download + basic preprocessing (SPY)
+- ✅ Day 2: walk-forward split planner (calendar months → last trading day), saved as plan CSV
+- ✅ Day 3: Z-score mean reversion signal + backtest core on `ret` (lagged position), basic metrics export
+
+## Planned milestones
+- Week 1: Walk-forward engine + metrics + leakage tests
+- Week 2: Options chain + implied volatility (IV) panel
+- Week 3: Surface smoothing baseline (spline/SVI/kernel)
+- Week 4: Heston calibration + comparison vs. baseline
+
+## Quickstart
+```bash
+pip install -r requirements.txt
+python scripts/pull_data.py

@@ -1,0 +1,15 @@
+pyproject.toml
+readme.md
+src/quant_walkforward.egg-info/PKG-INFO
+src/quant_walkforward.egg-info/SOURCES.txt
+src/quant_walkforward.egg-info/dependency_links.txt
+src/quant_walkforward.egg-info/requires.txt
+src/quant_walkforward.egg-info/top_level.txt
+src/qwf/__init__.py
+src/qwf/backtest.py
+src/qwf/data.py
+src/qwf/metrics.py
+src/qwf/splits.py
+src/qwf/reporting/__init__.py
+src/qwf/reporting/plots.py
+tests/test_leakage_and_lookahead.py
