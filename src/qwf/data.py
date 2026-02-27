@@ -51,7 +51,6 @@ def load_ohlcv(
     df.columns = [str(c).strip().replace(" ", "_") for c in df.columns]
 
     keep = [c for c in ["Open", "High", "Low", "Close", "Adj_Close", "Volume"] if c in df.columns]
-    print(type(df.columns), df.columns[:5])
     return df[keep]
 
 

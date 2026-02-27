@@ -1,8 +1,5 @@
 from __future__ import annotations
-
-from pathlib import Path
 from dataclasses import asdict, dataclass
-import json
 import numpy as np
 import pandas as pd
 
@@ -135,49 +132,42 @@ def backtest_from_position_ret(
     pos: pd.Series,
     ret_col: str = "ret",
     fill_missing_ret_with_zero: bool = True,
+    cost_bps_per_turnover: float = 0.0,
 ) -> pd.DataFrame:
-    """
-    Backtest using SIMPLE returns with strict lag enforcement:
-      pnl(t) = pos(t-1) * ret(t)
-
-    Returns DataFrame with: pos, pos_lag, ret, pnl, cum_pnl, equity
-    where:
-      - pnl is per-period portfolio simple return
-      - equity = (1 + pnl).cumprod()
-      - cum_pnl = equity - 1
-    """
     if ret_col not in df.columns:
-        raise ValueError(f"Missing ret_col='{ret_col}' in df.columns")
+        raise ValueError(f"Missing ret_col='{ret_col}' in df columns: {list(df.columns)}")
 
-    ret = pd.to_numeric(df[ret_col], errors="coerce").astype(float)
+    out = df.copy()
 
-    # Align indices
-    pos = pos.reindex(df.index).astype(float)
-    pos_lag = pos.shift(1)
+    pos_aligned = pd.to_numeric(pos.reindex(out.index), errors="coerce").astype(float).fillna(0.0)
 
+    ret_used = pd.to_numeric(out[ret_col], errors="coerce").astype(float)
     if fill_missing_ret_with_zero:
-        ret_used = ret.fillna(0.0)
-    else:
-        ret_used = ret
+        ret_used = ret_used.fillna(0.0)
 
-    pnl = pos_lag * ret_used  # portfolio simple return per period
-    equity = (1.0 + pnl).cumprod()
+    # no lookahead
+    pos_lag = pos_aligned.shift(1).fillna(0.0)
+    pnl_gross = pos_lag * ret_used
 
-    # If you prefer equity to start at 1 even if first rows are NaN-ish,
-    # fill initial NaNs in pnl with 0 by turning on fill_missing_ret_with_zero.
-    cum_pnl = equity - 1.0
+    # turnover + costs
+    turnover = pos_aligned.diff().abs().fillna(0.0)
+    cost_rate = float(cost_bps_per_turnover) / 10000.0
+    cost = turnover * cost_rate if cost_rate != 0.0 else turnover * 0.0
 
-    out = pd.DataFrame(
-        {
-            "pos": pos,
-            "pos_lag": pos_lag,
-            "ret": ret,
-            "pnl": pnl,
-            "cum_pnl": cum_pnl,
-            "equity": equity,
-        },
-        index=df.index,
-    )
+    pnl = pnl_gross - cost
+
+    out["pos"] = pos_aligned
+    out["pos_lag"] = pos_lag
+    out["ret"] = ret_used
+    out["pnl_gross"] = pnl_gross
+    out["turnover"] = turnover
+    out["cost"] = cost
+    out["pnl"] = pnl
+
+    pnl_filled = pnl.fillna(0.0)
+    out["cum_pnl"] = pnl_filled.cumsum()
+    out["equity"] = (1.0 + pnl_filled).cumprod()
+
     return out
 
 def run_wf_backtest_ret(
@@ -189,6 +179,7 @@ def run_wf_backtest_ret(
     cfg: ZScoreMRConfig = ZScoreMRConfig(),
     source_file: str | None = None,
     fill_missing_ret_with_zero: bool = True,
+    cost_bps_per_turnover: float = 0.0,
 ) -> pd.DataFrame:
     """
     Pure walk-forward backtest (NO I/O):
@@ -197,10 +188,15 @@ def run_wf_backtest_ret(
           fold_id, train_start, train_end, test_start, test_end
         (optionally also 'source_file' if you generated a multi-file plan)
 
+    Transaction costs:
+      - cost_bps_per_turnover: bps charged per 1.0 turnover, where
+          turnover_t = abs(pos_t - pos_{t-1})
+
     Returns:
       test_detail DataFrame indexed by date with columns:
         fold_id, train_start, train_end, test_start, test_end,
         z, target_pos, pos, pos_lag, ret, pnl, cum_pnl, equity
+      (and possibly extra cols like turnover/cost if backtest_from_position_ret returns them)
     """
     if not isinstance(df.index, pd.DatetimeIndex):
         df = df.copy()
@@ -256,6 +252,7 @@ def run_wf_backtest_ret(
             pos=pos,
             ret_col=ret_col,
             fill_missing_ret_with_zero=fill_missing_ret_with_zero,
+            cost_bps_per_turnover=cost_bps_per_turnover,  # ✅ NEW: pass costs
         )
 
         # add signal columns (avoid duplicating pos)
@@ -297,6 +294,9 @@ def run_wf_backtest_ret(
         "pos", "pos_lag",
         "ret", "pnl", "cum_pnl", "equity",
         "log_ret",
+        "turnover",
+        "cost",
+        "pnl_gross",
     ]
     cols = [c for c in preferred if c in test_detail.columns] + [c for c in test_detail.columns if c not in preferred]
     test_detail = test_detail[cols]

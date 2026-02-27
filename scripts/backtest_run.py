@@ -63,6 +63,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--ddof", type=int, default=0)
 
     p.add_argument("--save-per-fold", action="store_true", help="Save per-fold CSVs into out_dir/folds/")
+    p.add_argument("--cost-bps-per-turnover", type=float, default=0.0,
+                   help="Transaction cost in bps per 1.0 turnover (abs(pos-pos.shift(1))). Default 0.")
     return p.parse_args()
 
 
@@ -97,6 +99,20 @@ def main() -> None:
     )
 
     fold_summary = metrics.fold_summary(test_detail)
+    strategy_stitched = metrics.stitched_curve(test_detail, rolling_sharpe_window=None)
+    benchmark_stitched = metrics.buy_hold_stitched_curve(test_detail, ret_col=args.ret_col, rolling_sharpe_window=None)
+
+    strat_stats = metrics.perf_stats_from_pnl(strategy_stitched["pnl"])
+    bench_stats = metrics.perf_stats_from_pnl(benchmark_stitched["pnl"])
+
+    perf_summary = pd.DataFrame(
+        [
+            {"series": "strategy", **strat_stats},
+            {"series": "benchmark_buy_hold", **bench_stats},
+        ]
+    )
+    perf_path = args.out_dir / f"{args.run_name}_perf_summary.csv"
+    perf_summary.to_csv(perf_path, index=False)
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -140,6 +156,9 @@ def main() -> None:
         run_name=args.run_name,
         rolling_sharpe_window=63,
         save_per_fold_equity=True,  # když dáš True, uloží i per-fold pngčka
+        benchmark_stitched=benchmark_stitched,
+        strategy_label="Strategy",
+        benchmark_label="SPY Buy&Hold",
     )
     print(f"📈 Plots saved to: {plots_dir}")
 

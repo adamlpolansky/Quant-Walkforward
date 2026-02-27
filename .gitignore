@@ -1,18 +1,94 @@
-# Python
+# =========================
+# Python / Bytecode
+# =========================
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
-.pytest_cache/
+*.py[cod]
+*$py.class
 
-# Virtual env
+# =========================
+# Virtual envs
+# =========================
 .venv/
 venv/
+env/
+.conda/
+.uv/
 
-# IDE
+# =========================
+# Build / packaging
+# =========================
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+*.whl
+
+# =========================
+# Testing / coverage
+# =========================
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.log
+
+# =========================
+# Type checkers / linters
+# =========================
+.mypy_cache/
+.pyright/
+.ruff_cache/
+
+# =========================
+# Jupyter
+# =========================
+.ipynb_checkpoints/
+
+# =========================
+# IDEs
+# =========================
 .idea/
 .vscode/
+*.iml
 
-# Outputs / generated files
+# =========================
+# OS junk
+# =========================
+.DS_Store
+Thumbs.db
+
+# =========================
+# Project outputs / artifacts
+# =========================
 outputs/
-scripts/data/*.xlsx
+reports/
+plots/
+*.png
+*.pdf
+
+# If you want to keep some plots, comment out the lines above.
+
+# =========================
+# Local data (choose your policy)
+# =========================
+data/
+**/data/
+*.parquet
+*.feather
+*.pkl
+*.pickle
+
+# OPTIONAL: keep small example CSVs under scripts/data
+!scripts/data/
+!scripts/data/*.csv
+
+# =========================
+# Secrets
+# =========================
+.env
+.env.*
+*.key
+*.pem
+secrets/

@@ -220,6 +220,69 @@ def stitched_curve(
 
     return out
 
+def perf_stats_from_pnl(
+    pnl: pd.Series,
+    *,
+    periods_per_year: int = 252,
+) -> dict[str, float]:
+    """Simple performance stats from period returns (pnl)."""
+    x = _to_float(pnl).replace([np.inf, -np.inf], np.nan).dropna()
+    if x.empty:
+        return {
+            "total_return": np.nan,
+            "cagr": np.nan,
+            "ann_vol": np.nan,
+            "sharpe": np.nan,
+            "max_drawdown": np.nan,
+        }
+
+    eq = equity_from_pnl(x.fillna(0.0), start_equity=1.0)
+    dd = drawdown_from_equity(eq)
+
+    n = int(len(x))
+    total_return = float(eq.iloc[-1] - 1.0) if n else np.nan
+    cagr = (1.0 + total_return) ** (periods_per_year / n) - 1.0 if n and np.isfinite(total_return) else np.nan
+
+    sd = float(x.std(ddof=0)) if n > 1 else np.nan
+    mu = float(x.mean()) if n > 0 else np.nan
+    ann_vol = sd * np.sqrt(periods_per_year) if np.isfinite(sd) else np.nan
+    sharpe = (mu / sd) * np.sqrt(periods_per_year) if (np.isfinite(sd) and sd > 0) else np.nan
+
+    max_dd = float(dd.min()) if not dd.empty else np.nan
+
+    return {
+        "total_return": total_return,
+        "cagr": float(cagr) if np.isfinite(cagr) else np.nan,
+        "ann_vol": float(ann_vol) if np.isfinite(ann_vol) else np.nan,
+        "sharpe": float(sharpe) if np.isfinite(sharpe) else np.nan,
+        "max_drawdown": max_dd,
+    }
+
+
+def buy_hold_stitched_curve(
+    test_detail: pd.DataFrame,
+    *,
+    ret_col: str = "ret",
+    rolling_sharpe_window: int | None = 63,
+    periods_per_year: int = 252,
+) -> pd.DataFrame:
+    """
+    Buy & Hold benchmark stitched over the same test timeline.
+    pnl_bh(t) = ret(t)
+    """
+    if ret_col not in test_detail.columns:
+        raise ValueError(f"Missing '{ret_col}' in test_detail -> cannot build buy&hold benchmark.")
+
+    td = test_detail.copy()
+    td["pnl_bh"] = _to_float(td[ret_col]).fillna(0.0)
+
+    stitched = stitched_curve(
+        td,
+        pnl_col="pnl_bh",
+        rolling_sharpe_window=rolling_sharpe_window,
+        periods_per_year=periods_per_year,
+    )
+    return stitched
 
 def fold_summary(
     test_detail: pd.DataFrame,

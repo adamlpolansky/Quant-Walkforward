@@ -58,6 +58,9 @@ def save_report_plots(
     rolling_sharpe_window: int | None = 63,
     save_per_fold_equity: bool = False,
     max_folds: int = 24,
+    benchmark_stitched: pd.DataFrame | None = None,
+    strategy_label: str = "Strategy",
+    benchmark_label: str = "Buy & Hold",
 ) -> None:
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -67,6 +70,13 @@ def save_report_plots(
         rolling_sharpe_window=rolling_sharpe_window,
     )
 
+    if benchmark_stitched is not None:
+        plot_equity_compare(
+            stitched["equity"], benchmark_stitched["equity"],
+            label_a=strategy_label, label_b=benchmark_label,
+            title=f"{run_name} - Equity: Strategy vs Benchmark",
+            out_path=out_dir / "equity_vs_benchmark.png",
+        )
     plot_equity(
         stitched["equity"],
         title=f"{run_name} - Stitched Equity",
