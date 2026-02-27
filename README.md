@@ -34,6 +34,7 @@ Quant-Walkforward/
     pull_data.py                # (optional) data pull -> saves to scripts/data/
     rolling_splits.py           # generates walk-forward plan CSV (portable, no hardcoded paths)
     backtest_run.py             # runs walk-forward backtest + saves outputs + plots
+    param_sweep.py              # grid search / mini experiment runner
     data/                       # input CSVs (e.g., SPY.csv)
     splits_train_test/          # generated plan CSVs
 
@@ -56,6 +57,9 @@ Quant-Walkforward/
   - `rolling_splits.py` uses portable `Path(...)` defaults (no hardcoded Windows paths)
 - ✅ Plot reporting added (`qwf.reporting.plots`) and called from `scripts/backtest_run.py`
 - ✅ Walk-forward `test_detail` now recomputes fold-local `equity`/`cum_pnl` **after slicing to TEST** (prevents train-period carryover in per-fold test curves)
+- ✅ Benchmark comparison (Strategy vs SPY Buy & Hold) saved in report outputs
+- ✅ Transaction costs toggle via `--cost-bps-per-turnover`
+- ✅ Param sweep / mini experiment runner that saves `results_grid.csv`
 
 ---
 
@@ -102,6 +106,7 @@ pytest -q
    - `*_test_detail.csv`
    - `*_fold_summary.csv`
    - `*_config.json`
+   - `*_perf_summary.csv` (strategy vs benchmark summary)
    - plots under `outputs/plots/<run_name>/`
 5. Runs tests (if the test file names follow pytest conventions)
 
@@ -165,12 +170,38 @@ python scripts/backtest_run.py --save-per-fold
   - `--K` (default `1.0`)
   - `--step-frac` (default `0.25`)
   - `--ddof` (default `0`)
+- realism params:
+  - `--cost-bps-per-turnover` (default `0.0`)
 - `--save-per-fold` -> saves per-fold **CSV files** into `outputs/folds/`
 
-#### Example (custom run)
+#### Example (custom run + costs)
 ```bash
-python scripts/backtest_run.py   --plan scripts/splits_train_test/walkforward_plan_12_1.csv   --run-name wf_12m_1m_zscore_n20   --n 20 --K 1.0 --step-frac 0.25 --ddof 0   --save-per-fold
+python scripts/backtest_run.py \
+  --plan scripts/splits_train_test/walkforward_plan_12_1.csv \
+  --run-name wf_12m_1m_zscore_n20_cost10 \
+  --n 20 --K 1.0 --step-frac 0.25 --ddof 0 \
+  --cost-bps-per-turnover 10 \
+  --save-per-fold
 ```
+
+---
+
+### 4) Param sweep / mini experiment
+Run a small grid and save results:
+
+```bash
+python scripts/param_sweep.py --n-grid "10,20,40" --step-frac-grid "0.25,0.5"
+```
+
+Optional: include transaction costs in the sweep:
+
+```bash
+python scripts/param_sweep.py --n-grid "10,20,40" --step-frac-grid "0.25,0.5" --cost-bps-per-turnover 10
+```
+
+Outputs:
+- `outputs/experiments/results_grid.csv`
+- `outputs/experiments/results_grid_best.md` (Markdown table suitable for README)
 
 ---
 
@@ -180,6 +211,7 @@ python scripts/backtest_run.py   --plan scripts/splits_train_test/walkforward_pl
 - `outputs/<run_name>_test_detail.csv`
 - `outputs/<run_name>_fold_summary.csv`
 - `outputs/<run_name>_config.json`
+- `outputs/<run_name>_perf_summary.csv` (strategy vs benchmark summary)
 
 ### Plots
 Plots are saved under:
@@ -194,6 +226,7 @@ Typical files:
 - `rolling_sharpe.png`
 - `sharpe_by_fold.png`
 - `total_return_by_fold.png`
+- `equity_vs_benchmark.png` (Strategy vs SPY Buy & Hold)
 
 ### Per-fold plots (important)
 `--save-per-fold` currently saves **CSV files only** (not PNG plots).
@@ -318,3 +351,39 @@ This project is intentionally small and modular:
 - outputs and plots are saved to disk for inspection / iteration
 
 It is designed as a clean foundation for future work (intraday signals, options data, IV surfaces, and Heston calibration).
+
+---
+
+## End of week one (reflection)
+
+**Week 1 goal:** build a tiny research framework that is *honest* (no lookahead), reproducible, and easy to extend.
+
+### What I built 
+- A simple end-to-end pipeline: **data → splits → walk-forward backtest → metrics → plots**
+- A walk-forward plan generator that uses **calendar months** and maps to trading days.
+- A minimal mean-reversion signal (Z-score) with **lagged execution** (`pos(t-1) * ret(t)`).
+- A report layer that saves CSV outputs + stitched equity/drawdown plots.
+- Guardrails and tests for typical time-series mistakes (leakage/lookahead).
+
+### “Realism checks” I added 
+- **Benchmark comparison:** strategy equity vs **SPY buy & hold** over the same stitched test timeline.
+- **Transaction costs (optional):** `--cost-bps-per-turnover` penalizes turnover  
+  (`turnover = abs(pos - pos.shift(1))`, `cost = turnover * bps/10000`).
+- **Mini experiment runner:** small parameter sweep to avoid tuning-by-feel and to keep a record of experiments.
+
+### What I learned (so far) 
+- The hardest part is making the pipeline **correct by construction**:
+  - time indexing discipline,
+  - lag-only application,
+  - fold-local accounting,
+  - and tests that fail loudly when something is off.
+- I also learned how much *presentation* matters: stitched curves + benchmark + a simple grid table
+  seems much more convincing.
+
+### Week 2 direction 
+Next step is to keep the same philosophy (small + clean + testable) but move to options:
+- pull an options chain dataset (or a small static sample),
+- build an IV panel and a baseline smoothing method,
+- and only then go for full surface modeling and Heston calibration.
+
+*Note: (This README section is a living log — I’m treating it as my “lab notebook” for the project.)*
