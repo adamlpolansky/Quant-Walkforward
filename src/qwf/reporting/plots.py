@@ -133,3 +133,28 @@ def save_report_plots(
                 title=f"{run_name} - Fold {fid} Drawdown (local)",
                 out_path=out_dir / "folds" / f"drawdown_fold_{fid}.png",
             )
+
+def plot_equity_compare(
+        equity_a: pd.Series,
+        equity_b: pd.Series,
+        *,
+        label_a: str,
+        label_b: str,
+        title: str,
+        out_path: Path,
+) -> None:
+    # Align to common index (safe if series have slight diffs)
+    idx = equity_a.index.intersection(equity_b.index)
+    a = equity_a.reindex(idx)
+    b = equity_b.reindex(idx)
+
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    ax.plot(a.index, a.values, label=label_a)
+    ax.plot(b.index, b.values, label=label_b)
+    ax.set_title(title)
+    ax.set_xlabel("Date")
+    ax.set_ylabel("Equity")
+    ax.grid(True)
+    ax.legend()
+    _save(fig, out_path)

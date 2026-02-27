@@ -70,6 +70,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    args.out_dir.mkdir(parents=True, exist_ok=True)
     df = _load_price_csv(args.data, date_col=args.date_col)
     df = _ensure_returns(df, price_col=args.price_col, ret_col=args.ret_col)
 
@@ -90,13 +91,14 @@ def main() -> None:
     )
 
     test_detail = run_wf_backtest_ret(
-        df=df,
-        plan=plan,
-        price_col=args.price_col,
-        ret_col=args.ret_col,
-        cfg=cfg,
-        source_file=source_file,
-    )
+    df=df,
+    plan=plan,
+    price_col=args.price_col,
+    ret_col=args.ret_col,
+    cfg=cfg,
+    source_file=source_file,
+    cost_bps_per_turnover=args.cost_bps_per_turnover,
+)
 
     fold_summary = metrics.fold_summary(test_detail)
     strategy_stitched = metrics.stitched_curve(test_detail, rolling_sharpe_window=None)
