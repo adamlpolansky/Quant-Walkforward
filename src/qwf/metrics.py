@@ -74,6 +74,32 @@ def rolling_sharpe(
     return sr
 
 
+def sortino_ratio(
+    returns: pd.Series,
+    target: float = 0.0,
+    periods_per_year: int = 252,
+) -> float:
+    x = _to_float(returns).replace([np.inf, -np.inf], np.nan).dropna()
+    if x.empty:
+        return np.nan
+
+    downside = x[x < target] - float(target)
+    if downside.empty:
+        return np.nan
+
+    downside_dev = float(downside.std(ddof=0))
+    if not np.isfinite(downside_dev) or downside_dev <= 0.0:
+        return np.nan
+
+    numerator = float((x - float(target)).mean()) * periods_per_year
+    denominator = downside_dev * np.sqrt(periods_per_year)
+    if not np.isfinite(numerator) or not np.isfinite(denominator) or denominator <= 0.0:
+        return np.nan
+
+    out = numerator / denominator
+    return float(out) if np.isfinite(out) else np.nan
+
+
 def add_pnl(
     detail: pd.DataFrame,
     *,
@@ -233,6 +259,7 @@ def perf_stats_from_pnl(
             "cagr": np.nan,
             "ann_vol": np.nan,
             "sharpe": np.nan,
+            "sortino": np.nan,
             "max_drawdown": np.nan,
         }
 
@@ -247,6 +274,7 @@ def perf_stats_from_pnl(
     mu = float(x.mean()) if n > 0 else np.nan
     ann_vol = sd * np.sqrt(periods_per_year) if np.isfinite(sd) else np.nan
     sharpe = (mu / sd) * np.sqrt(periods_per_year) if (np.isfinite(sd) and sd > 0) else np.nan
+    sortino = sortino_ratio(x, target=0.0, periods_per_year=periods_per_year)
 
     max_dd = float(dd.min()) if not dd.empty else np.nan
 
@@ -255,6 +283,7 @@ def perf_stats_from_pnl(
         "cagr": float(cagr) if np.isfinite(cagr) else np.nan,
         "ann_vol": float(ann_vol) if np.isfinite(ann_vol) else np.nan,
         "sharpe": float(sharpe) if np.isfinite(sharpe) else np.nan,
+        "sortino": float(sortino) if np.isfinite(sortino) else np.nan,
         "max_drawdown": max_dd,
     }
 
@@ -362,3 +391,167 @@ def fold_summary(
     ]
     cols = [c for c in preferred if c in out.columns] + [c for c in out.columns if c not in preferred]
     return out[cols].sort_values("fold_id").reset_index(drop=True)
+
+
+def daily_cross_sectional_ic(
+    predictions: pd.DataFrame,
+    *,
+    date_col: str = "date",
+    score_col: str = "score",
+    forward_ret_col: str = "forward_ret",
+    compute_rank_ic: bool = True,
+) -> pd.DataFrame:
+    required = [date_col, score_col, forward_ret_col]
+    missing = [col for col in required if col not in predictions.columns]
+    if missing:
+        raise ValueError(f"Predictions are missing required IC columns: {missing}")
+
+    rows: list[dict[str, float | int | pd.Timestamp]] = []
+    for trade_date, group in predictions.groupby(date_col, sort=True):
+        valid = group[[score_col, forward_ret_col]].dropna()
+        pearson_ic = np.nan
+        rank_ic = np.nan
+
+        if len(valid) >= 2:
+            if valid[score_col].nunique() > 1 and valid[forward_ret_col].nunique() > 1:
+                pearson_ic = float(valid[score_col].corr(valid[forward_ret_col], method="pearson"))
+                if compute_rank_ic:
+                    rank_ic = float(valid[score_col].corr(valid[forward_ret_col], method="spearman"))
+
+        rows.append(
+            {
+                "date": pd.Timestamp(trade_date),
+                "n_assets": int(len(valid)),
+                "ic_pearson": pearson_ic,
+                "ic_spearman": rank_ic,
+            }
+        )
+
+    return pd.DataFrame(rows).sort_values("date").reset_index(drop=True)
+
+
+def summarize_ic(
+    ic_daily: pd.DataFrame,
+    *,
+    ic_col: str = "ic_pearson",
+) -> dict[str, float]:
+    if ic_col not in ic_daily.columns:
+        raise ValueError(f"IC daily data is missing '{ic_col}'")
+
+    x = _to_float(ic_daily[ic_col]).dropna()
+    if x.empty:
+        return {
+            "mean_ic": np.nan,
+            "ic_std": np.nan,
+            "ic_ir": np.nan,
+            "n_ic_days": 0,
+        }
+
+    mean_ic = float(x.mean())
+    ic_std = float(x.std(ddof=0))
+    ic_ir = mean_ic / ic_std if np.isfinite(ic_std) and ic_std > 0 else np.nan
+
+    return {
+        "mean_ic": mean_ic,
+        "ic_std": ic_std,
+        "ic_ir": float(ic_ir) if np.isfinite(ic_ir) else np.nan,
+        "n_ic_days": int(len(x)),
+    }
+
+
+def daily_long_short_spread(
+    portfolio_detail: pd.DataFrame,
+    *,
+    date_col: str = "date",
+    weight_col: str = "weight",
+    forward_ret_col: str = "forward_ret",
+) -> pd.DataFrame:
+    required = [date_col, weight_col, forward_ret_col]
+    missing = [col for col in required if col not in portfolio_detail.columns]
+    if missing:
+        raise ValueError(f"Portfolio detail is missing spread columns: {missing}")
+
+    rows: list[dict[str, float | int | pd.Timestamp]] = []
+    for trade_date, group in portfolio_detail.groupby(date_col, sort=True):
+        longs = group[(group[weight_col] > 0.0) & group[forward_ret_col].notna()]
+        shorts = group[(group[weight_col] < 0.0) & group[forward_ret_col].notna()]
+
+        long_mean = float(longs[forward_ret_col].mean()) if not longs.empty else np.nan
+        short_mean = float(shorts[forward_ret_col].mean()) if not shorts.empty else np.nan
+        spread = long_mean - short_mean if np.isfinite(long_mean) and np.isfinite(short_mean) else np.nan
+
+        rows.append(
+            {
+                "date": pd.Timestamp(trade_date),
+                "n_longs": int(len(longs)),
+                "n_shorts": int(len(shorts)),
+                "long_mean_ret": long_mean,
+                "short_mean_ret": short_mean,
+                "spread": spread,
+            }
+        )
+
+    return pd.DataFrame(rows).sort_values("date").reset_index(drop=True)
+
+
+def summarize_spread(
+    spread_daily: pd.DataFrame,
+    *,
+    spread_col: str = "spread",
+) -> dict[str, float]:
+    if spread_col not in spread_daily.columns:
+        raise ValueError(f"Spread daily data is missing '{spread_col}'")
+
+    x = _to_float(spread_daily[spread_col]).dropna()
+    if x.empty:
+        return {
+            "mean_spread": np.nan,
+            "spread_std": np.nan,
+            "n_spread_days": 0,
+        }
+
+    return {
+        "mean_spread": float(x.mean()),
+        "spread_std": float(x.std(ddof=0)),
+        "n_spread_days": int(len(x)),
+    }
+
+
+def portfolio_perf_summary(
+    portfolio_daily: pd.DataFrame,
+    *,
+    gross_ret_col: str = "portfolio_ret_gross",
+    net_ret_col: str = "portfolio_ret_net",
+    turnover_col: str = "turnover",
+    cost_col: str = "cost",
+    gross_exposure_col: str = "gross_exposure",
+    periods_per_year: int = 252,
+) -> dict[str, float]:
+    missing = [col for col in [gross_ret_col, net_ret_col, turnover_col, cost_col] if col not in portfolio_daily.columns]
+    if missing:
+        raise ValueError(f"Portfolio daily data is missing performance columns: {missing}")
+
+    gross_stats = perf_stats_from_pnl(portfolio_daily[gross_ret_col], periods_per_year=periods_per_year)
+    net_stats = perf_stats_from_pnl(portfolio_daily[net_ret_col], periods_per_year=periods_per_year)
+
+    turnover = _to_float(portfolio_daily[turnover_col])
+    cost = _to_float(portfolio_daily[cost_col])
+
+    if gross_exposure_col in portfolio_daily.columns:
+        gross_exposure = _to_float(portfolio_daily[gross_exposure_col]).fillna(0.0)
+        n_traded_days = int((gross_exposure > 0.0).sum())
+    else:
+        n_traded_days = int(_to_float(portfolio_daily[net_ret_col]).notna().sum())
+
+    return {
+        "total_return_gross": gross_stats["total_return"],
+        "total_return_net": net_stats["total_return"],
+        "cagr_net": net_stats["cagr"],
+        "ann_vol_net": net_stats["ann_vol"],
+        "sharpe_net": net_stats["sharpe"],
+        "sortino_net": net_stats["sortino"],
+        "max_drawdown_net": net_stats["max_drawdown"],
+        "mean_turnover": float(turnover.mean()) if not turnover.empty else np.nan,
+        "mean_cost": float(cost.mean()) if not cost.empty else np.nan,
+        "n_traded_days": n_traded_days,
+    }

@@ -85,9 +85,7 @@ def make_walkforward_plan_for_directory(
     - Next fold moves by step_months (calendar months) from the fold's train month start.
 
     Output columns:
-      source_file, fold_id,
-      train_start, train_end, test_start, test_end,
-      train_months, test_months, step_months, start_date
+      source_file, fold_id, train_start, train_end, test_start, test_end
     """
     input_dir = Path(input_dir)
     output_csv = Path(output_csv)
@@ -172,4 +170,90 @@ def make_walkforward_plan_for_directory(
 
     output_csv.parent.mkdir(parents=True, exist_ok=True)
     plan.to_csv(output_csv, index=False)
+    return plan
+
+
+def make_global_walkforward_plan_from_dates(
+    dates: pd.DatetimeIndex | list[pd.Timestamp] | pd.Series,
+    *,
+    train_months: int,
+    test_months: int,
+    step_months: int = 1,
+    start_date: str | pd.Timestamp = "2018-01-01",
+    output_csv: str | Path | None = None,
+) -> pd.DataFrame:
+    """
+    Build a single global walk-forward plan from a shared trading calendar.
+
+    Output columns:
+      fold_id, train_start, train_end, test_start, test_end
+    """
+    if train_months < 1 or test_months < 1 or step_months < 1:
+        raise ValueError("train_months, test_months, step_months must be >= 1")
+
+    idx = pd.DatetimeIndex(pd.to_datetime(dates, errors="coerce")).dropna().unique().sort_values()
+    if idx.empty:
+        raise ValueError("dates must contain at least one valid timestamp")
+
+    if getattr(idx, "tz", None) is not None:
+        idx = idx.tz_localize(None)
+
+    start_ts = pd.Timestamp(start_date).normalize()
+    max_date = pd.Timestamp(idx[-1]).normalize()
+    anchor_month_start = _month_start(start_ts)
+
+    rows: list[dict[str, Any]] = []
+    fold_id = 0
+    k = 0
+
+    while True:
+        fold_train_month_start = anchor_month_start + pd.DateOffset(months=k * step_months)
+        train_start_cal = start_ts if k == 0 else fold_train_month_start
+
+        if train_start_cal > max_date:
+            break
+
+        train_end_cal = _calendar_end_of_month_window(train_start_cal, train_months)
+        test_start_cal = _month_start(train_start_cal) + pd.DateOffset(months=train_months)
+        test_end_cal = _calendar_end_of_month_window(test_start_cal, test_months)
+
+        if test_start_cal > max_date:
+            break
+
+        train_start = _first_date_on_or_after(idx, train_start_cal)
+        train_end = _last_date_on_or_before(idx, train_end_cal)
+        test_start = _first_date_on_or_after(idx, test_start_cal)
+        test_end = _last_date_on_or_before(idx, test_end_cal)
+
+        if (
+            train_start is None or train_end is None or
+            test_start is None or test_end is None or
+            train_start > train_end or
+            test_start > test_end
+        ):
+            k += 1
+            continue
+
+        rows.append(
+            {
+                "fold_id": fold_id,
+                "train_start": train_start.date().isoformat(),
+                "train_end": train_end.date().isoformat(),
+                "test_start": test_start.date().isoformat(),
+                "test_end": test_end.date().isoformat(),
+            }
+        )
+
+        fold_id += 1
+        k += 1
+
+    plan = pd.DataFrame(rows)
+    if plan.empty:
+        raise RuntimeError("No valid global folds produced. Check start_date or the shared calendar.")
+
+    if output_csv is not None:
+        output_path = Path(output_csv)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        plan.to_csv(output_path, index=False)
+
     return plan

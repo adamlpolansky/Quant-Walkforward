@@ -23,11 +23,13 @@ dist/
 .eggs/
 pip-wheel-metadata/
 *.whl
+src/*.egg-info/
 
 # =========================
 # Testing / coverage
 # =========================
 .pytest_cache/
+tests/__pycache__/
 .coverage
 .coverage.*
 htmlcov/
@@ -67,6 +69,8 @@ reports/
 plots/
 *.png
 *.pdf
+scripts/splits_train_test/*.csv
+scripts/data/*.xlsx
 
 # If you want to keep some plots, comment out the lines above.
 
