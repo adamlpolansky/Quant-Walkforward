@@ -4,7 +4,6 @@ import argparse
 import json
 from pathlib import Path
 
-import matplotlib.pyplot as plt
 import pandas as pd
 
 from qwf.data import load_price_panel_from_directory
@@ -12,6 +11,9 @@ from qwf.experiments import run_cross_sectional_walkforward_experiment
 from qwf.features import DAILY_FEATURE_COLUMNS, make_daily_features
 from qwf.labels import add_forward_return_label
 from qwf.models import SUPPORTED_MODEL_NAMES
+from qwf.portfolio import summarize_ticker_selection
+from qwf.reporting.plots import save_xs_report_plots
+from qwf.signals import SUPPORTED_SCORE_NORMALIZATIONS, SUPPORTED_SCORE_SMOOTHING
 from qwf.splits import make_global_walkforward_plan_from_dates
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -33,20 +35,6 @@ def _build_model_params(args: argparse.Namespace) -> dict[str, float]:
     return params
 
 
-def _save_line_plot(series_df: pd.DataFrame, *, x_col: str, y_col: str, title: str, y_label: str, out_path: Path) -> None:
-    fig = plt.figure()
-    ax = fig.add_subplot(111)
-    ax.plot(series_df[x_col], series_df[y_col])
-    ax.set_title(title)
-    ax.set_xlabel("Date")
-    ax.set_ylabel(y_label)
-    ax.grid(True)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.tight_layout()
-    fig.savefig(out_path, dpi=150)
-    plt.close(fig)
-
-
 def parse_args() -> argparse.Namespace:
     default_input = ROOT / "scripts" / "data"
     default_out = ROOT / "outputs"
@@ -64,6 +52,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--alpha", type=float, default=1.0)
     p.add_argument("--l1-ratio", type=float, default=None, help="ElasticNet l1_ratio. Ignored for other models.")
     p.add_argument("--k", type=int, default=3)
+    p.add_argument("--score-normalization", type=str, default="none", choices=SUPPORTED_SCORE_NORMALIZATIONS)
+    p.add_argument("--score-smoothing", type=str, default="none", choices=SUPPORTED_SCORE_SMOOTHING)
     p.add_argument("--train-months", type=int, default=9)
     p.add_argument("--test-months", type=int, default=1)
     p.add_argument("--step-months", type=int, default=1)
@@ -135,6 +125,8 @@ def main() -> None:
         model_params=model_params,
         alpha=args.alpha,
         k=args.k,
+        score_normalization=args.score_normalization,
+        score_smoothing=args.score_smoothing,
         cost_bps_per_turnover=args.cost_bps_per_turnover,
     )
 
@@ -147,12 +139,14 @@ def main() -> None:
     summary["date_start"] = str(panel["date"].min().date())
     summary["date_end"] = str(panel["date"].max().date())
     summary["plan_path"] = str(plan_path)
+    ticker_summary = summarize_ticker_selection(portfolio_detail, score_col=summary["score_col"])
 
     pred_path = args.out_dir / f"{args.run_name}_predictions.csv"
     detail_path = args.out_dir / f"{args.run_name}_portfolio_detail.csv"
     daily_path = args.out_dir / f"{args.run_name}_portfolio_daily.csv"
     ic_path = args.out_dir / f"{args.run_name}_ic_daily.csv"
     spread_path = args.out_dir / f"{args.run_name}_spread_daily.csv"
+    ticker_summary_path = args.out_dir / f"{args.run_name}_ticker_summary.csv"
     summary_path = args.out_dir / f"{args.run_name}_xs_summary.json"
 
     predictions.to_csv(pred_path, index=False)
@@ -160,45 +154,64 @@ def main() -> None:
     portfolio_daily.to_csv(daily_path, index=False)
     ic_daily.to_csv(ic_path, index=False)
     spread_daily.to_csv(spread_path, index=False)
+    ticker_summary.to_csv(ticker_summary_path, index=False)
     summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
 
     plots_dir = args.out_dir / "plots"
-    equity_plot_path = plots_dir / f"{args.run_name}_xs_equity.png"
-    ic_plot_path = plots_dir / f"{args.run_name}_daily_ic.png"
-
-    _save_line_plot(
+    plot_paths = save_xs_report_plots(
         portfolio_daily,
-        x_col="date",
-        y_col="equity",
-        title=f"{args.run_name} - Net Equity",
-        y_label="Equity",
-        out_path=equity_plot_path,
+        ic_daily,
+        spread_daily,
+        ticker_summary,
+        out_dir=plots_dir,
+        run_name=args.run_name,
     )
-    _save_line_plot(
-        ic_daily.fillna({"ic_pearson": 0.0}),
-        x_col="date",
-        y_col="ic_pearson",
-        title=f"{args.run_name} - Daily Pearson IC",
-        y_label="IC",
-        out_path=ic_plot_path,
-    )
+    best_ticker = ticker_summary.iloc[0]
+    worst_ticker = ticker_summary.iloc[-1]
+    if summary["n_constant_score_days"] > 0:
+        print(
+            f"warning: {summary['n_constant_score_days']} dates had constant scores across all tickers and were skipped"
+        )
 
-    print(f"Saved:\n- {pred_path}\n- {detail_path}\n- {daily_path}\n- {ic_path}\n- {spread_path}\n- {summary_path}")
-    print(f"Plots saved:\n- {equity_plot_path}\n- {ic_plot_path}")
+    print(
+        "Saved:\n"
+        f"- {pred_path}\n"
+        f"- {detail_path}\n"
+        f"- {daily_path}\n"
+        f"- {ic_path}\n"
+        f"- {spread_path}\n"
+        f"- {ticker_summary_path}\n"
+        f"- {summary_path}"
+    )
+    print(
+        "Plots saved:\n"
+        f"- {plot_paths['equity']}\n"
+        f"- {plot_paths['daily_ic']}\n"
+        f"- {plot_paths['rolling_ic']}\n"
+        f"- {plot_paths['drawdown']}\n"
+        f"- {plot_paths['long_short_spread']}\n"
+        f"- {plot_paths['ticker_contribution']}"
+    )
     print(
         "Run summary:\n"
         f"- model: {summary['model_name']}\n"
         f"- model params: {json.dumps(summary['model_params'], sort_keys=True)}\n"
+        f"- label horizon: {summary['label_horizon']}d\n"
+        f"- score normalization: {summary['score_normalization']}\n"
+        f"- score smoothing: {summary['score_smoothing']}\n"
         f"- tickers: {summary['n_tickers']}\n"
         f"- date range: {summary['date_start']} to {summary['date_end']}\n"
         f"- folds: {summary['n_folds']}\n"
         f"- traded days: {summary['n_traded_days']}\n"
+        f"- constant-score days skipped: {summary['n_constant_score_days']}\n"
         f"- mean IC: {summary['mean_ic']:.6f}\n"
         f"- mean spread: {summary['mean_spread']:.6f}\n"
         f"- total return net: {summary['total_return_net']:.6f}\n"
         f"- sharpe net: {summary['sharpe_net']:.6f}\n"
         f"- sortino net: {summary['sortino_net']:.6f}\n"
-        f"- max drawdown net: {summary['max_drawdown_net']:.6f}"
+        f"- max drawdown net: {summary['max_drawdown_net']:.6f}\n"
+        f"- best contributor: {best_ticker['ticker']} ({best_ticker['total_contribution']:.6f})\n"
+        f"- worst contributor: {worst_ticker['ticker']} ({worst_ticker['total_contribution']:.6f})"
     )
 
 

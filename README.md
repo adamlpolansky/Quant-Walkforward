@@ -21,6 +21,7 @@ python scripts/make_synthetic_xs_data.py --help
 python scripts/rolling_splits_global.py --help
 python scripts/run_xs_model.py --help
 python scripts/run_xs_ablation.py --help
+python scripts/run_xs_strategy_ablation.py --help
 ```
 
 ## Week-1 workflow
@@ -48,8 +49,8 @@ The repo now includes a minimal daily cross-sectional baseline:
 - long panel built from local per-ticker CSV files
 - shared global calendar from the intersection of selected tickers
 - simple per-ticker daily features
-- one forward label: next-day close-to-close return
-- pooled ridge regression across train rows
+- forward labels such as 1-day, 3-day, or 5-day close-to-close returns
+- pooled linear-model baselines across train rows
 - daily top-k / bottom-k equal-weight long-short portfolio
 - evaluation with daily IC, long-short spread, and portfolio performance summary
 
@@ -59,6 +60,7 @@ Main week-2 scripts:
 - `scripts/rolling_splits_global.py`: build a single global split plan from the shared calendar
 - `scripts/run_xs_model.py`: load local CSVs, build features and labels, optionally auto-build a global plan, fit the ridge baseline, and save predictions plus portfolio outputs
 - `scripts/run_xs_ablation.py`: run a small linear-model ablation grid and save one summary row per experiment
+- `scripts/run_xs_strategy_ablation.py`: run a small strategy-settings ablation for one chosen model configuration
 
 Preferred offline demo flow:
 
@@ -97,7 +99,19 @@ Run the existing week-2 cross-sectional baseline on the downloaded directory:
 python scripts/run_xs_model.py --input-dir scripts/data/real_etf_xs --run-name etf_xs_v1 --train-months 12 --test-months 3 --step-months 3 --start-date 2020-01-01 --k 2
 ```
 
-Expected outputs remain the same as the synthetic demo: predictions CSV, portfolio detail CSV, portfolio daily CSV, IC daily CSV, spread daily CSV, summary JSON, equity plot, and daily IC plot under `outputs/`.
+Controlled baseline enhancements are also available through optional flags on `scripts/run_xs_model.py`:
+
+- label horizon: `1`, `3`, or `5` days
+- score normalization: `none`, `zscore`, `rank_to_minus1_plus1`
+- score smoothing: `none`, `ema_3`, `ema_5`
+
+Example ETF report run with the stronger elasticnet-style baseline settings:
+
+```bash
+python scripts/run_xs_model.py --input-dir scripts/data/real_etf_xs --run-name etf_xs_elasticnet_h3_v1 --model-name elasticnet --alpha 0.001 --l1-ratio 0.5 --label-horizon 3 --k 3 --score-normalization zscore --score-smoothing ema_3 --train-months 12 --test-months 3 --step-months 3 --start-date 2020-01-01
+```
+
+Week-2 reporting now also writes richer diagnostics for the same run, including long-vs-short spread plots, rolling IC, drawdown, and a ticker summary table. For the sector ETF universe, the ticker summary is also a simple sector-level diagnostic. Degenerate constant-score dates are detected and skipped instead of being treated like normal ranked cross-sections.
 
 This is the first real-data validation workflow for week 2. It is intentionally not production data infrastructure.
 
@@ -125,6 +139,14 @@ The default grid includes:
 
 The main output is `outputs/<run_name>_ablation_summary.csv`, one row per experiment with IC, spread, and portfolio summary metrics.
 
+For a small strategy-settings sweep around one chosen model configuration, use:
+
+```bash
+python scripts/run_xs_strategy_ablation.py --input-dir scripts/data/real_etf_xs --run-name etf_xs_strategy_ablation_v1 --model-name elasticnet --alpha 0.001 --l1-ratio 0.5 --label-horizons 1,3,5 --k-values 2,3,4 --score-normalizations none,zscore,rank_to_minus1_plus1 --score-smoothing-methods none,ema_3 --train-months 12 --test-months 3 --step-months 3 --start-date 2020-01-01
+```
+
+This is still a controlled week-2 baseline enhancement pass, not advanced optimization infrastructure.
+
 If `--plan` is omitted, `scripts/run_xs_model.py` builds a global plan automatically from the intersected panel calendar and saves it alongside the other outputs.
 
 Week-2 outputs include:
@@ -134,15 +156,20 @@ Week-2 outputs include:
 - `<run_name>_portfolio_daily.csv`
 - `<run_name>_ic_daily.csv`
 - `<run_name>_spread_daily.csv`
+- `<run_name>_ticker_summary.csv`
 - `<run_name>_xs_summary.json`
 - `outputs/plots/<run_name>_xs_equity.png`
 - `outputs/plots/<run_name>_daily_ic.png`
+- `outputs/plots/<run_name>_rolling_ic.png`
+- `outputs/plots/<run_name>_drawdown.png`
+- `outputs/plots/<run_name>_long_short_spread.png`
+- `outputs/plots/<run_name>_ticker_contribution.png`
 
 Week-2 summary metrics include:
 
 - daily Pearson IC summary (`mean_ic`, `ic_std`, `ic_ir`, `n_ic_days`)
 - daily long-short spread summary (`mean_spread`, `spread_std`, `n_spread_days`)
-- portfolio summary (`total_return_gross`, `total_return_net`, `cagr_net`, `ann_vol_net`, `sharpe_net`, `max_drawdown_net`, `mean_turnover`, `mean_cost`, `n_traded_days`)
+- portfolio summary (`total_return_gross`, `total_return_net`, `cagr_net`, `ann_vol_net`, `sharpe_net`, `max_drawdown_net`, `mean_turnover`, `mean_cost`, `n_traded_days`, `n_constant_score_days`)
 
 Turnover convention:
 

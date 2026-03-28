@@ -11,7 +11,7 @@ import pandas as pd
 from qwf.data import load_price_panel_from_directory
 from qwf.experiments import run_cross_sectional_walkforward_experiment
 from qwf.features import DAILY_FEATURE_COLUMNS, make_daily_features
-from qwf.labels import add_forward_return_label
+from qwf.labels import add_forward_return_labels
 from qwf.models import SUPPORTED_MODEL_NAMES
 from qwf.signals import SUPPORTED_SCORE_NORMALIZATIONS, SUPPORTED_SCORE_SMOOTHING
 from qwf.splits import make_global_walkforward_plan_from_dates
@@ -19,17 +19,14 @@ from qwf.splits import make_global_walkforward_plan_from_dates
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_INPUT_DIR = ROOT / "scripts" / "data" / "real_etf_xs"
 DEFAULT_OUT_DIR = ROOT / "outputs"
-DEFAULT_MODEL_NAMES = ",".join(SUPPORTED_MODEL_NAMES)
-DEFAULT_RIDGE_ALPHAS = "0.1,1.0,10.0"
-DEFAULT_LASSO_ALPHAS = "0.0001,0.001,0.01"
-DEFAULT_ELASTICNET_ALPHAS = "0.0001,0.001"
-DEFAULT_ELASTICNET_L1_RATIOS = "0.25,0.5,0.75"
 
 
 @dataclass(frozen=True)
-class AblationSpec:
-    model_name: str
-    model_params: dict[str, float]
+class StrategySpec:
+    label_horizon: int
+    k: int
+    score_normalization: str
+    score_smoothing: str
 
 
 def _parse_csv_tokens(value: str | None) -> list[str]:
@@ -43,90 +40,88 @@ def _parse_tickers(value: str | None) -> list[str] | None:
     return tickers or None
 
 
-def _parse_model_names(value: str) -> list[str]:
-    model_names = [item.lower() for item in _parse_csv_tokens(value)]
-    if not model_names:
-        raise ValueError("At least one model name is required")
+def _parse_int_list(value: str) -> list[int]:
+    values = _parse_csv_tokens(value)
+    if not values:
+        raise ValueError("Expected at least one integer value")
+    return [int(item) for item in values]
 
-    invalid = sorted(set(model_names) - set(SUPPORTED_MODEL_NAMES))
+
+def _parse_choice_list(value: str, *, supported: Sequence[str], label: str) -> list[str]:
+    values = [item.lower() for item in _parse_csv_tokens(value)]
+    if not values:
+        raise ValueError(f"Expected at least one {label}")
+    invalid = sorted(set(values) - set(supported))
     if invalid:
-        raise ValueError(f"Unsupported model names: {invalid}. Supported models: {list(SUPPORTED_MODEL_NAMES)}")
+        raise ValueError(f"Unsupported {label}: {invalid}. Supported values: {list(supported)}")
 
     deduped: list[str] = []
     seen: set[str] = set()
-    for model_name in model_names:
-        if model_name in seen:
+    for item in values:
+        if item in seen:
             continue
-        seen.add(model_name)
-        deduped.append(model_name)
+        seen.add(item)
+        deduped.append(item)
     return deduped
 
 
-def _parse_float_list(value: str) -> list[float]:
-    values = _parse_csv_tokens(value)
-    if not values:
-        raise ValueError("Expected at least one numeric value")
-    return [float(item) for item in values]
+def _build_model_params(args: argparse.Namespace) -> dict[str, float]:
+    params: dict[str, float] = {}
+    if args.model_name in {"ridge", "lasso", "elasticnet"}:
+        params["alpha"] = float(args.alpha)
+    if args.model_name == "elasticnet" and args.l1_ratio is not None:
+        params["l1_ratio"] = float(args.l1_ratio)
+    return params
 
 
-def _format_experiment_name(spec: AblationSpec) -> str:
-    if not spec.model_params:
-        return spec.model_name
+def _format_experiment_name(spec: StrategySpec) -> str:
+    return (
+        f"h{spec.label_horizon}"
+        f"__k{spec.k}"
+        f"__norm_{spec.score_normalization}"
+        f"__smooth_{spec.score_smoothing}"
+    )
 
-    parts = [spec.model_name]
-    for key, value in sorted(spec.model_params.items()):
-        parts.append(f"{key}_{value:g}")
-    return "__".join(parts)
 
-
-def build_ablation_specs(
+def build_strategy_specs(
     *,
-    model_names: Sequence[str],
-    ridge_alphas: Sequence[float],
-    lasso_alphas: Sequence[float],
-    elasticnet_alphas: Sequence[float],
-    elasticnet_l1_ratios: Sequence[float],
-) -> list[AblationSpec]:
-    specs: list[AblationSpec] = []
-
-    for model_name in model_names:
-        if model_name == "linear":
-            specs.append(AblationSpec(model_name="linear", model_params={}))
-        elif model_name == "ridge":
-            specs.extend(
-                AblationSpec(model_name="ridge", model_params={"alpha": float(alpha)})
-                for alpha in ridge_alphas
-            )
-        elif model_name == "lasso":
-            specs.extend(
-                AblationSpec(model_name="lasso", model_params={"alpha": float(alpha)})
-                for alpha in lasso_alphas
-            )
-        elif model_name == "elasticnet":
-            for alpha in elasticnet_alphas:
-                for l1_ratio in elasticnet_l1_ratios:
+    label_horizons: Sequence[int],
+    k_values: Sequence[int],
+    score_normalizations: Sequence[str],
+    score_smoothing_methods: Sequence[str],
+) -> list[StrategySpec]:
+    specs: list[StrategySpec] = []
+    for label_horizon in label_horizons:
+        for k in k_values:
+            for score_normalization in score_normalizations:
+                for score_smoothing in score_smoothing_methods:
                     specs.append(
-                        AblationSpec(
-                            model_name="elasticnet",
-                            model_params={"alpha": float(alpha), "l1_ratio": float(l1_ratio)},
+                        StrategySpec(
+                            label_horizon=int(label_horizon),
+                            k=int(k),
+                            score_normalization=str(score_normalization),
+                            score_smoothing=str(score_smoothing),
                         )
                     )
     return specs
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run a small week-2 cross-sectional model ablation grid.")
+    parser = argparse.ArgumentParser(description="Run a small week-2 strategy-settings ablation for one model configuration.")
     parser.add_argument("--input-dir", type=Path, default=DEFAULT_INPUT_DIR, help="Directory with one daily CSV per ticker")
     parser.add_argument("--plan", type=Path, default=None, help="Optional global walk-forward plan CSV")
     parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUT_DIR, help="Output directory")
-    parser.add_argument("--run-name", type=str, default="etf_xs_ablation_v1", help="Prefix for summary outputs")
+    parser.add_argument("--run-name", type=str, default="etf_xs_strategy_ablation_v1", help="Prefix for summary outputs")
     parser.add_argument("--date-col", type=str, default="Date")
     parser.add_argument("--tickers", type=str, default=None, help="Optional comma-separated subset, for example SPY,QQQ")
     parser.add_argument("--recursive", action="store_true", help="Search for CSV files recursively")
-    parser.add_argument("--label-horizon", type=int, default=1)
-    parser.add_argument("--k", type=int, default=2)
-    parser.add_argument("--score-normalization", type=str, default="none", choices=SUPPORTED_SCORE_NORMALIZATIONS)
-    parser.add_argument("--score-smoothing", type=str, default="none", choices=SUPPORTED_SCORE_SMOOTHING)
+    parser.add_argument("--model-name", type=str, default="elasticnet", choices=SUPPORTED_MODEL_NAMES)
+    parser.add_argument("--alpha", type=float, default=0.001)
+    parser.add_argument("--l1-ratio", type=float, default=0.5, help="ElasticNet l1_ratio. Ignored for other models.")
+    parser.add_argument("--label-horizons", type=str, default="1,3,5")
+    parser.add_argument("--k-values", type=str, default="2,3,4")
+    parser.add_argument("--score-normalizations", type=str, default="none,zscore,rank_to_minus1_plus1")
+    parser.add_argument("--score-smoothing-methods", type=str, default="none,ema_3")
     parser.add_argument("--train-months", type=int, default=12)
     parser.add_argument("--test-months", type=int, default=3)
     parser.add_argument("--step-months", type=int, default=3)
@@ -137,22 +132,13 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=0.0,
         help="Transaction cost in bps per one-way turnover. Default 0.",
     )
-    parser.add_argument(
-        "--model-names",
-        type=str,
-        default=DEFAULT_MODEL_NAMES,
-        help="Comma-separated model families to include. Supported: linear,ridge,lasso,elasticnet",
-    )
-    parser.add_argument("--ridge-alphas", type=str, default=DEFAULT_RIDGE_ALPHAS)
-    parser.add_argument("--lasso-alphas", type=str, default=DEFAULT_LASSO_ALPHAS)
-    parser.add_argument("--elasticnet-alphas", type=str, default=DEFAULT_ELASTICNET_ALPHAS)
-    parser.add_argument("--elasticnet-l1-ratios", type=str, default=DEFAULT_ELASTICNET_L1_RATIOS)
     return parser.parse_args(argv)
 
 
 def main(argv: Sequence[str] | None = None) -> None:
     args = parse_args(argv)
     args.out_dir.mkdir(parents=True, exist_ok=True)
+    model_params = _build_model_params(args)
 
     panel = load_price_panel_from_directory(
         args.input_dir,
@@ -163,28 +149,29 @@ def main(argv: Sequence[str] | None = None) -> None:
     )
     aligned_tickers = int(panel["ticker"].nunique())
     shared_dates = panel["date"].drop_duplicates().sort_values().reset_index(drop=True)
+    k_values = _parse_int_list(args.k_values)
     print(
         "Aligned panel:\n"
         f"- tickers: {aligned_tickers}\n"
         f"- shared dates: {len(shared_dates)}\n"
         f"- date range: {shared_dates.iloc[0].date()} to {shared_dates.iloc[-1].date()}"
     )
-    if aligned_tickers < max(2, 2 * args.k):
+    if aligned_tickers < max(2, 2 * max(k_values)):
         print(
             "Warning:\n"
-            f"- requested k={args.k}, but only {aligned_tickers} tickers remain after alignment\n"
+            f"- requested max k={max(k_values)}, but only {aligned_tickers} tickers remain after alignment\n"
             "- the daily portfolio builder will clip k to the available cross-section"
         )
 
-    panel = make_daily_features(panel)
-    label_col = f"label_{args.label_horizon}d_fwd"
-    panel = add_forward_return_label(panel, horizon=args.label_horizon, label_col=label_col)
+    feature_panel = make_daily_features(panel)
+    label_horizons = _parse_int_list(args.label_horizons)
+    panel_with_labels = add_forward_return_labels(feature_panel, horizons=label_horizons)
 
     plan_path = args.plan
     if plan_path is None:
-        plan_path = args.out_dir / f"{args.run_name}_ablation_plan.csv"
+        plan_path = args.out_dir / f"{args.run_name}_strategy_ablation_plan.csv"
         plan = make_global_walkforward_plan_from_dates(
-            panel["date"].drop_duplicates().sort_values(),
+            panel_with_labels["date"].drop_duplicates().sort_values(),
             train_months=args.train_months,
             test_months=args.test_months,
             step_months=args.step_months,
@@ -197,35 +184,42 @@ def main(argv: Sequence[str] | None = None) -> None:
             parse_dates=["train_start", "train_end", "test_start", "test_end"],
         )
 
-    selected_model_names = _parse_model_names(args.model_names)
-    specs = build_ablation_specs(
-        model_names=selected_model_names,
-        ridge_alphas=_parse_float_list(args.ridge_alphas) if "ridge" in selected_model_names else [],
-        lasso_alphas=_parse_float_list(args.lasso_alphas) if "lasso" in selected_model_names else [],
-        elasticnet_alphas=_parse_float_list(args.elasticnet_alphas) if "elasticnet" in selected_model_names else [],
-        elasticnet_l1_ratios=_parse_float_list(args.elasticnet_l1_ratios) if "elasticnet" in selected_model_names else [],
+    specs = build_strategy_specs(
+        label_horizons=label_horizons,
+        k_values=k_values,
+        score_normalizations=_parse_choice_list(
+            args.score_normalizations,
+            supported=SUPPORTED_SCORE_NORMALIZATIONS,
+            label="score normalizations",
+        ),
+        score_smoothing_methods=_parse_choice_list(
+            args.score_smoothing_methods,
+            supported=SUPPORTED_SCORE_SMOOTHING,
+            label="score smoothing methods",
+        ),
     )
     if not specs:
-        raise ValueError("No ablation experiments were generated from the supplied grid")
+        raise ValueError("No strategy-setting experiments were generated from the supplied grid")
 
     rows: list[dict[str, object]] = []
     for idx, spec in enumerate(specs, start=1):
+        label_col = f"label_{spec.label_horizon}d_fwd"
         experiment_name = _format_experiment_name(spec)
         print(
-            f"[{idx}/{len(specs)}] "
-            f"{experiment_name} with params {json.dumps(spec.model_params, sort_keys=True)}"
+            f"[{idx}/{len(specs)}] {experiment_name} "
+            f"for model={args.model_name} params={json.dumps(model_params, sort_keys=True)}"
         )
         results = run_cross_sectional_walkforward_experiment(
-            panel,
+            panel_with_labels,
             plan,
             feature_cols=DAILY_FEATURE_COLUMNS,
             label_col=label_col,
-            label_horizon=args.label_horizon,
-            model_name=spec.model_name,
-            model_params=spec.model_params,
-            k=args.k,
-            score_normalization=args.score_normalization,
-            score_smoothing=args.score_smoothing,
+            label_horizon=spec.label_horizon,
+            model_name=args.model_name,
+            model_params=model_params,
+            k=spec.k,
+            score_normalization=spec.score_normalization,
+            score_smoothing=spec.score_smoothing,
             cost_bps_per_turnover=args.cost_bps_per_turnover,
         )
         summary = dict(results["summary"])
@@ -233,6 +227,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             print(
                 f"warning: {experiment_name} skipped {summary['n_constant_score_days']} constant-score dates"
             )
+
         rows.append(
             {
                 "experiment_name": experiment_name,
@@ -246,10 +241,8 @@ def main(argv: Sequence[str] | None = None) -> None:
                 "n_traded_days": summary["n_traded_days"],
                 "n_constant_score_days": summary["n_constant_score_days"],
                 "mean_ic": summary["mean_ic"],
-                "ic_ir": summary["ic_ir"],
                 "mean_spread": summary["mean_spread"],
                 "total_return_net": summary["total_return_net"],
-                "cagr_net": summary["cagr_net"],
                 "sharpe_net": summary["sharpe_net"],
                 "sortino_net": summary["sortino_net"],
                 "max_drawdown_net": summary["max_drawdown_net"],
@@ -270,10 +263,8 @@ def main(argv: Sequence[str] | None = None) -> None:
         "n_traded_days",
         "n_constant_score_days",
         "mean_ic",
-        "ic_ir",
         "mean_spread",
         "total_return_net",
-        "cagr_net",
         "sharpe_net",
         "sortino_net",
         "max_drawdown_net",
@@ -281,14 +272,14 @@ def main(argv: Sequence[str] | None = None) -> None:
     ]
     summary_df = summary_df[ordered_cols]
 
-    summary_path = args.out_dir / f"{args.run_name}_ablation_summary.csv"
+    summary_path = args.out_dir / f"{args.run_name}_strategy_ablation_summary.csv"
     summary_df.to_csv(summary_path, index=False)
 
-    print(f"Saved ablation summary: {summary_path}")
+    print(f"Saved strategy ablation summary: {summary_path}")
     print(f"Plan path: {plan_path}")
     print(
         "Top results by sharpe_net:\n"
-        f"{summary_df.sort_values('sharpe_net', ascending=False).head(5).to_string(index=False)}"
+        f"{summary_df.sort_values('sharpe_net', ascending=False).head(10).to_string(index=False)}"
     )
 
 

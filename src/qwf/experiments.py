@@ -7,6 +7,7 @@ import pandas as pd
 from qwf import metrics
 from qwf.models import fit_model, predict_scores, resolve_model_params
 from qwf.portfolio import build_daily_top_bottom_portfolio
+from qwf.signals import prepare_cross_sectional_scores
 
 
 def _normalize_plan(plan: pd.DataFrame) -> pd.DataFrame:
@@ -51,8 +52,11 @@ def run_cross_sectional_walkforward_experiment(
     model_params: Mapping[str, Any] | None = None,
     alpha: float = 1.0,
     k: int = 3,
+    score_normalization: str = "none",
+    score_smoothing: str = "none",
     cost_bps_per_turnover: float = 0.0,
     score_col: str = "score",
+    signal_score_col: str = "score_signal",
 ) -> dict[str, pd.DataFrame | dict[str, Any]]:
     if "date" not in panel.columns or "ticker" not in panel.columns:
         raise ValueError("Panel must contain 'date' and 'ticker' columns")
@@ -103,35 +107,47 @@ def run_cross_sectional_walkforward_experiment(
 
     predictions = pd.concat(fold_predictions, ignore_index=True, sort=False)
     predictions = predictions.sort_values(["date", "ticker"], kind="mergesort").reset_index(drop=True)
+    predictions = prepare_cross_sectional_scores(
+        predictions,
+        raw_score_col=score_col,
+        out_col=signal_score_col,
+        score_smoothing=score_smoothing,
+        score_normalization=score_normalization,
+    )
 
     portfolio_detail, portfolio_daily = build_daily_top_bottom_portfolio(
         predictions,
-        score_col=score_col,
+        score_col=signal_score_col,
         forward_ret_col=label_col,
         k=k,
         cost_bps_per_turnover=cost_bps_per_turnover,
     )
     ic_daily = metrics.daily_cross_sectional_ic(
         predictions,
-        score_col=score_col,
+        score_col=signal_score_col,
         forward_ret_col=label_col,
     )
     spread_daily = metrics.daily_long_short_spread(portfolio_detail)
+    n_constant_score_days = int(portfolio_daily["is_constant_score_day"].fillna(False).astype(bool).sum())
 
     summary: dict[str, Any] = {
         "n_folds": int(plan_df["fold_id"].nunique()),
         "n_prediction_rows": int(len(predictions)),
-        "n_scored_rows": int(predictions[score_col].notna().sum()),
+        "n_scored_rows": int(predictions[signal_score_col].notna().sum()),
         "n_portfolio_days": int(len(portfolio_daily)),
         "n_tickers": int(predictions["ticker"].nunique()),
         "model_name": normalized_model_name,
         "model_params": dict(resolved_model_params),
         "alpha": float(resolved_model_params.get("alpha", alpha)),
         "k": int(k),
+        "score_normalization": str(score_normalization),
+        "score_smoothing": str(score_smoothing),
         "cost_bps_per_turnover": float(cost_bps_per_turnover),
         "label_horizon": int(label_horizon),
         "label_col": label_col,
-        "score_col": score_col,
+        "score_col": signal_score_col,
+        "raw_score_col": score_col,
+        "n_constant_score_days": n_constant_score_days,
         "turnover_convention": "one_way_half_abs_change",
         "feature_cols": list(feature_cols),
         **metrics.summarize_ic(ic_daily),
