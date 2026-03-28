@@ -20,6 +20,7 @@ python scripts/param_sweep.py --help
 python scripts/make_synthetic_xs_data.py --help
 python scripts/rolling_splits_global.py --help
 python scripts/run_xs_model.py --help
+python scripts/run_xs_ablation.py --help
 ```
 
 ## Week-1 workflow
@@ -57,6 +58,7 @@ Main week-2 scripts:
 - `scripts/make_synthetic_xs_data.py`: generate a deterministic offline demo universe
 - `scripts/rolling_splits_global.py`: build a single global split plan from the shared calendar
 - `scripts/run_xs_model.py`: load local CSVs, build features and labels, optionally auto-build a global plan, fit the ridge baseline, and save predictions plus portfolio outputs
+- `scripts/run_xs_ablation.py`: run a small linear-model ablation grid and save one summary row per experiment
 
 Preferred offline demo flow:
 
@@ -98,6 +100,30 @@ python scripts/run_xs_model.py --input-dir scripts/data/real_etf_xs --run-name e
 Expected outputs remain the same as the synthetic demo: predictions CSV, portfolio detail CSV, portfolio daily CSV, IC daily CSV, spread daily CSV, summary JSON, equity plot, and daily IC plot under `outputs/`.
 
 This is the first real-data validation workflow for week 2. It is intentionally not production data infrastructure.
+
+## Week-2 ablations
+
+The repo also includes a small ablation runner for the same local daily cross-sectional workflow:
+
+- `linear`
+- `ridge`
+- `lasso`
+- `elasticnet`
+
+Example ETF-universe ablation run:
+
+```bash
+python scripts/run_xs_ablation.py --input-dir scripts/data/real_etf_xs --run-name etf_xs_ablation_v1 --train-months 12 --test-months 3 --step-months 3 --start-date 2020-01-01 --k 2
+```
+
+The default grid includes:
+
+- `linear`
+- `ridge` with `alpha` in `{0.1, 1.0, 10.0}`
+- `lasso` with `alpha` in `{0.0001, 0.001, 0.01}`
+- `elasticnet` with `alpha` in `{0.0001, 0.001}` and `l1_ratio` in `{0.25, 0.5, 0.75}`
+
+The main output is `outputs/<run_name>_ablation_summary.csv`, one row per experiment with IC, spread, and portfolio summary metrics.
 
 If `--plan` is omitted, `scripts/run_xs_model.py` builds a global plan automatically from the intersected panel calendar and saves it alongside the other outputs.
 

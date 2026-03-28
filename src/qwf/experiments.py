@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Mapping
 
 import pandas as pd
 
 from qwf import metrics
-from qwf.models import fit_ridge_model, predict_scores
+from qwf.models import fit_model, predict_scores, resolve_model_params
 from qwf.portfolio import build_daily_top_bottom_portfolio
 
 
@@ -47,6 +47,8 @@ def run_cross_sectional_walkforward_experiment(
     feature_cols: list[str],
     label_col: str,
     label_horizon: int = 1,
+    model_name: str = "ridge",
+    model_params: Mapping[str, Any] | None = None,
     alpha: float = 1.0,
     k: int = 3,
     cost_bps_per_turnover: float = 0.0,
@@ -64,6 +66,11 @@ def run_cross_sectional_walkforward_experiment(
     global_dates = pd.DatetimeIndex(panel_sorted["date"].drop_duplicates().sort_values())
     plan_df = _normalize_plan(plan)
     fold_predictions: list[pd.DataFrame] = []
+    normalized_model_name = str(model_name).strip().lower()
+    effective_model_params = dict(model_params or {})
+    if not effective_model_params and normalized_model_name in {"ridge", "lasso", "elasticnet"}:
+        effective_model_params["alpha"] = alpha
+    resolved_model_params = resolve_model_params(normalized_model_name, effective_model_params)
 
     for row in plan_df.itertuples(index=False):
         train_label_cutoff = _resolve_train_label_cutoff(global_dates, row.train_end, label_horizon)
@@ -76,7 +83,13 @@ def run_cross_sectional_walkforward_experiment(
         if test_df.empty:
             continue
 
-        model = fit_ridge_model(train_df, feature_cols, label_col=label_col, alpha=alpha)
+        model = fit_model(
+            train_df,
+            feature_cols,
+            label_col=label_col,
+            model_name=normalized_model_name,
+            model_params=resolved_model_params,
+        )
         scored_test = predict_scores(model, test_df, feature_cols, score_col=score_col)
         scored_test["fold_id"] = row.fold_id
         scored_test["train_start"] = row.train_start
@@ -111,7 +124,9 @@ def run_cross_sectional_walkforward_experiment(
         "n_scored_rows": int(predictions[score_col].notna().sum()),
         "n_portfolio_days": int(len(portfolio_daily)),
         "n_tickers": int(predictions["ticker"].nunique()),
-        "alpha": float(alpha),
+        "model_name": normalized_model_name,
+        "model_params": dict(resolved_model_params),
+        "alpha": float(resolved_model_params.get("alpha", alpha)),
         "k": int(k),
         "cost_bps_per_turnover": float(cost_bps_per_turnover),
         "label_horizon": int(label_horizon),

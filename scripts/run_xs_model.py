@@ -11,6 +11,7 @@ from qwf.data import load_price_panel_from_directory
 from qwf.experiments import run_cross_sectional_walkforward_experiment
 from qwf.features import DAILY_FEATURE_COLUMNS, make_daily_features
 from qwf.labels import add_forward_return_label
+from qwf.models import SUPPORTED_MODEL_NAMES
 from qwf.splits import make_global_walkforward_plan_from_dates
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -21,6 +22,15 @@ def _parse_tickers(value: str | None) -> list[str] | None:
         return None
     tickers = [item.strip() for item in value.split(",") if item.strip()]
     return tickers or None
+
+
+def _build_model_params(args: argparse.Namespace) -> dict[str, float]:
+    params: dict[str, float] = {}
+    if args.model_name in {"ridge", "lasso", "elasticnet"}:
+        params["alpha"] = float(args.alpha)
+    if args.model_name == "elasticnet" and args.l1_ratio is not None:
+        params["l1_ratio"] = float(args.l1_ratio)
+    return params
 
 
 def _save_line_plot(series_df: pd.DataFrame, *, x_col: str, y_col: str, title: str, y_label: str, out_path: Path) -> None:
@@ -41,7 +51,7 @@ def parse_args() -> argparse.Namespace:
     default_input = ROOT / "scripts" / "data"
     default_out = ROOT / "outputs"
 
-    p = argparse.ArgumentParser(description="Run the week-2 cross-sectional ridge baseline.")
+    p = argparse.ArgumentParser(description="Run the week-2 cross-sectional baseline model.")
     p.add_argument("--input-dir", type=Path, default=default_input, help="Directory with one daily CSV per ticker")
     p.add_argument("--plan", type=Path, default=None, help="Optional global walk-forward plan CSV")
     p.add_argument("--out-dir", type=Path, default=default_out, help="Output directory")
@@ -50,7 +60,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--tickers", type=str, default=None, help="Optional comma-separated subset, for example SPY,QQQ,IWM")
     p.add_argument("--recursive", action="store_true", help="Search for CSV files recursively")
     p.add_argument("--label-horizon", type=int, default=1)
+    p.add_argument("--model-name", type=str, default="ridge", choices=SUPPORTED_MODEL_NAMES)
     p.add_argument("--alpha", type=float, default=1.0)
+    p.add_argument("--l1-ratio", type=float, default=None, help="ElasticNet l1_ratio. Ignored for other models.")
     p.add_argument("--k", type=int, default=3)
     p.add_argument("--train-months", type=int, default=9)
     p.add_argument("--test-months", type=int, default=1)
@@ -68,6 +80,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     args.out_dir.mkdir(parents=True, exist_ok=True)
+    model_params = _build_model_params(args)
 
     panel = load_price_panel_from_directory(
         args.input_dir,
@@ -118,6 +131,8 @@ def main() -> None:
         feature_cols=DAILY_FEATURE_COLUMNS,
         label_col=label_col,
         label_horizon=args.label_horizon,
+        model_name=args.model_name,
+        model_params=model_params,
         alpha=args.alpha,
         k=args.k,
         cost_bps_per_turnover=args.cost_bps_per_turnover,
@@ -172,6 +187,8 @@ def main() -> None:
     print(f"Plots saved:\n- {equity_plot_path}\n- {ic_plot_path}")
     print(
         "Run summary:\n"
+        f"- model: {summary['model_name']}\n"
+        f"- model params: {json.dumps(summary['model_params'], sort_keys=True)}\n"
         f"- tickers: {summary['n_tickers']}\n"
         f"- date range: {summary['date_start']} to {summary['date_end']}\n"
         f"- folds: {summary['n_folds']}\n"

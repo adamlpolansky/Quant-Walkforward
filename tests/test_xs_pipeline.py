@@ -90,6 +90,8 @@ def test_run_cross_sectional_walkforward_experiment_returns_richer_summary() -> 
     assert set(["ic_pearson", "n_assets"]).issubset(ic_daily.columns)
     assert set(["long_mean_ret", "short_mean_ret", "spread"]).issubset(spread_daily.columns)
     assert summary["turnover_convention"] == "one_way_half_abs_change"
+    assert summary["model_name"] == "ridge"
+    assert summary["model_params"] == {"alpha": 1.0}
     assert set(
         [
             "mean_ic",
