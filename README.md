@@ -35,7 +35,7 @@ pytest -q
 
 Key scripts:
 
-- `scripts/pull_data.py`: download daily SPY data to `scripts/data/SPY.csv`
+- `scripts/pull_data.py`: download daily SPY data by default, or a small multi-ticker ETF universe into per-ticker CSV files
 - `scripts/rolling_splits.py`: generate a walk-forward plan CSV from local input files
 - `scripts/backtest_run.py`: run the week-1 walk-forward backtest and save reports
 - `scripts/param_sweep.py`: run a small parameter grid over the current week-1 engine
@@ -64,6 +64,40 @@ Preferred offline demo flow:
 python scripts/make_synthetic_xs_data.py
 python scripts/run_xs_model.py --input-dir scripts/data/demo_xs --run-name demo_xs --train-months 12 --test-months 3 --step-months 3 --start-date 2020-01-01 --k 2
 ```
+
+## Week-2 real ETF workflow
+
+First real-data validation universe:
+
+- `XLC`
+- `XLY`
+- `XLP`
+- `XLE`
+- `XLF`
+- `XLV`
+- `XLI`
+- `XLB`
+- `XLRE`
+- `XLK`
+- `XLU`
+- `SPY`
+- `QQQ`
+
+Download the ETF CSV files from yfinance:
+
+```bash
+python scripts/pull_data.py --use-default-etf-universe --start-date 2018-01-01 --output-dir scripts/data/real_etf_xs
+```
+
+Run the existing week-2 cross-sectional baseline on the downloaded directory:
+
+```bash
+python scripts/run_xs_model.py --input-dir scripts/data/real_etf_xs --run-name etf_xs_v1 --train-months 12 --test-months 3 --step-months 3 --start-date 2020-01-01 --k 2
+```
+
+Expected outputs remain the same as the synthetic demo: predictions CSV, portfolio detail CSV, portfolio daily CSV, IC daily CSV, spread daily CSV, summary JSON, equity plot, and daily IC plot under `outputs/`.
+
+This is the first real-data validation workflow for week 2. It is intentionally not production data infrastructure.
 
 If `--plan` is omitted, `scripts/run_xs_model.py` builds a global plan automatically from the intersected panel calendar and saves it alongside the other outputs.
 

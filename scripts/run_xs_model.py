@@ -76,6 +76,21 @@ def main() -> None:
         recursive=args.recursive,
         intersect_dates=True,
     )
+    aligned_tickers = int(panel["ticker"].nunique())
+    shared_dates = panel["date"].drop_duplicates().sort_values().reset_index(drop=True)
+    print(
+        "Aligned panel:\n"
+        f"- tickers: {aligned_tickers}\n"
+        f"- shared dates: {len(shared_dates)}\n"
+        f"- date range: {shared_dates.iloc[0].date()} to {shared_dates.iloc[-1].date()}"
+    )
+    if aligned_tickers < max(2, 2 * args.k):
+        print(
+            "Warning:\n"
+            f"- requested k={args.k}, but only {aligned_tickers} tickers remain after alignment\n"
+            "- the daily portfolio builder will clip k to the available cross-section"
+        )
+
     panel = make_daily_features(panel)
     label_col = f"label_{args.label_horizon}d_fwd"
     panel = add_forward_return_label(panel, horizon=args.label_horizon, label_col=label_col)
