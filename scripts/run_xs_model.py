@@ -10,6 +10,7 @@ from qwf.data import load_price_panel_from_directory
 from qwf.experiments import run_cross_sectional_walkforward_experiment
 from qwf.features import DAILY_FEATURE_COLUMNS, make_daily_features
 from qwf.labels import add_forward_return_label
+from qwf.metrics import benchmark_perf_summary, build_xs_benchmark_curves
 from qwf.models import SUPPORTED_MODEL_NAMES
 from qwf.portfolio import summarize_ticker_selection
 from qwf.reporting.plots import save_xs_report_plots
@@ -42,6 +43,12 @@ def _build_model_params(args: argparse.Namespace) -> dict[str, float]:
     if args.model_name == "elasticnet" and args.l1_ratio is not None:
         params["l1_ratio"] = float(args.l1_ratio)
     return params
+
+
+def _format_metric(value: object) -> str:
+    if value is None or pd.isna(value):
+        return "unavailable"
+    return f"{float(value):.6f}"
 
 
 def parse_args() -> argparse.Namespace:
@@ -150,6 +157,23 @@ def main() -> None:
     summary["date_end"] = str(panel["date"].max().date())
     summary["plan_path"] = str(plan_snapshot_path)
     ticker_summary = summarize_ticker_selection(portfolio_detail, score_col=summary["score_col"])
+    benchmark_curves = build_xs_benchmark_curves(
+        predictions,
+        portfolio_daily,
+        label_col=label_col,
+    )
+    summary.update(benchmark_perf_summary(benchmark_curves, return_col="spy_return", prefix="spy"))
+    summary.update(benchmark_perf_summary(benchmark_curves, return_col="eq_universe_return", prefix="eq_universe"))
+    summary["strategy_minus_spy_total_return"] = (
+        float(summary["total_return_net"] - summary["spy_total_return"])
+        if pd.notna(summary["total_return_net"]) and pd.notna(summary["spy_total_return"])
+        else float("nan")
+    )
+    summary["strategy_minus_eq_universe_total_return"] = (
+        float(summary["total_return_net"] - summary["eq_universe_total_return"])
+        if pd.notna(summary["total_return_net"]) and pd.notna(summary["eq_universe_total_return"])
+        else float("nan")
+    )
 
     pred_path = run_paths.run_dir / "predictions.csv"
     detail_path = run_paths.run_dir / "portfolio_detail.csv"
@@ -222,6 +246,7 @@ def main() -> None:
         ic_daily,
         spread_daily,
         ticker_summary,
+        benchmark_curves=benchmark_curves,
         out_dir=run_paths.plots_dir,
         run_name=args.run_name,
     )
@@ -256,34 +281,49 @@ def main() -> None:
         f"- {plot_paths['rolling_ic']}\n"
         f"- {plot_paths['drawdown']}\n"
         f"- {plot_paths['long_short_spread']}\n"
-        f"- {plot_paths['ticker_contribution']}"
+        f"- {plot_paths['ticker_contribution']}\n"
+        f"- {plot_paths['benchmark_overlay']}"
     )
     if champion_paths:
         print(
             "Champions updated:\n"
             + "\n".join(f"- {path}" for path in champion_paths)
         )
-    print(
-        "Run summary:\n"
-        f"- model: {summary['model_name']}\n"
-        f"- model params: {json.dumps(summary['model_params'], sort_keys=True)}\n"
-        f"- label horizon: {summary['label_horizon']}d\n"
-        f"- score normalization: {summary['score_normalization']}\n"
-        f"- score smoothing: {summary['score_smoothing']}\n"
-        f"- tickers: {summary['n_tickers']}\n"
-        f"- date range: {summary['date_start']} to {summary['date_end']}\n"
-        f"- folds: {summary['n_folds']}\n"
-        f"- traded days: {summary['n_traded_days']}\n"
-        f"- constant-score days skipped: {summary['n_constant_score_days']}\n"
-        f"- mean IC: {summary['mean_ic']:.6f}\n"
-        f"- mean spread: {summary['mean_spread']:.6f}\n"
-        f"- total return net: {summary['total_return_net']:.6f}\n"
-        f"- sharpe net: {summary['sharpe_net']:.6f}\n"
-        f"- sortino net: {summary['sortino_net']:.6f}\n"
-        f"- max drawdown net: {summary['max_drawdown_net']:.6f}\n"
-        f"- best contributor: {best_ticker['ticker']} ({best_ticker['total_contribution']:.6f})\n"
-        f"- worst contributor: {worst_ticker['ticker']} ({worst_ticker['total_contribution']:.6f})"
-    )
+    benchmark_lines = [
+        f"- equal-weight universe total return: {_format_metric(summary['eq_universe_total_return'])}",
+        f"- strategy minus equal-weight universe total return: {_format_metric(summary['strategy_minus_eq_universe_total_return'])}",
+    ]
+    if pd.notna(summary["spy_total_return"]):
+        benchmark_lines.extend(
+            [
+                f"- SPY total return: {_format_metric(summary['spy_total_return'])}",
+                f"- strategy minus SPY total return: {_format_metric(summary['strategy_minus_spy_total_return'])}",
+            ]
+        )
+    else:
+        benchmark_lines.append("- SPY benchmark: unavailable (SPY not in run universe)")
+    run_summary_lines = [
+        f"- model: {summary['model_name']}",
+        f"- model params: {json.dumps(summary['model_params'], sort_keys=True)}",
+        f"- label horizon: {summary['label_horizon']}d",
+        f"- score normalization: {summary['score_normalization']}",
+        f"- score smoothing: {summary['score_smoothing']}",
+        f"- tickers: {summary['n_tickers']}",
+        f"- date range: {summary['date_start']} to {summary['date_end']}",
+        f"- folds: {summary['n_folds']}",
+        f"- traded days: {summary['n_traded_days']}",
+        f"- constant-score days skipped: {summary['n_constant_score_days']}",
+        f"- mean IC: {summary['mean_ic']:.6f}",
+        f"- mean spread: {summary['mean_spread']:.6f}",
+        f"- total return net: {summary['total_return_net']:.6f}",
+        f"- sharpe net: {summary['sharpe_net']:.6f}",
+        f"- sortino net: {summary['sortino_net']:.6f}",
+        f"- max drawdown net: {summary['max_drawdown_net']:.6f}",
+        *benchmark_lines,
+        f"- best contributor: {best_ticker['ticker']} ({best_ticker['total_contribution']:.6f})",
+        f"- worst contributor: {worst_ticker['ticker']} ({worst_ticker['total_contribution']:.6f})",
+    ]
+    print("Run summary:\n" + "\n".join(run_summary_lines))
 
 
 if __name__ == "__main__":

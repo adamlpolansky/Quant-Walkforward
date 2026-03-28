@@ -136,7 +136,7 @@ def test_week2_demo_scripts_run_end_to_end_without_network(tmp_path: Path) -> No
         text=True,
     )
 
-    subprocess.run(
+    result = subprocess.run(
         [
             sys.executable,
             "scripts/run_xs_model.py",
@@ -186,6 +186,7 @@ def test_week2_demo_scripts_run_end_to_end_without_network(tmp_path: Path) -> No
     assert (run_dir / "plots" / "drawdown.png").exists()
     assert (run_dir / "plots" / "long_short_spread.png").exists()
     assert (run_dir / "plots" / "ticker_contribution.png").exists()
+    assert (run_dir / "plots" / "benchmark_overlay.png").exists()
     assert (out_dir / "champions" / "best_by_sharpe.json").exists()
     assert (out_dir / "champions" / "best_by_sortino.json").exists()
     assert (out_dir / "champions" / "best_by_mean_ic.json").exists()
@@ -208,8 +209,29 @@ def test_week2_demo_scripts_run_end_to_end_without_network(tmp_path: Path) -> No
     assert summary["score_normalization"] == "none"
     assert summary["score_smoothing"] == "none"
     assert summary["n_constant_score_days"] == 0
+    assert set(
+        [
+            "spy_total_return",
+            "spy_cagr",
+            "spy_ann_vol",
+            "spy_sharpe",
+            "spy_max_drawdown",
+            "eq_universe_total_return",
+            "eq_universe_cagr",
+            "eq_universe_ann_vol",
+            "eq_universe_sharpe",
+            "eq_universe_max_drawdown",
+            "strategy_minus_spy_total_return",
+            "strategy_minus_eq_universe_total_return",
+        ]
+    ).issubset(summary.keys())
+    assert np.isnan(summary["spy_total_return"])
+    assert np.isfinite(summary["eq_universe_total_return"])
     assert set(["run_name", "run_type", "path_to_run_dir"]).issubset(registry.columns)
     assert (registry["run_name"] == run_name).any()
+    assert "benchmark_overlay.png" in result.stdout
+    assert "equal-weight universe total return" in result.stdout
+    assert "SPY benchmark: unavailable" in result.stdout
 
 
 def test_run_cross_sectional_walkforward_experiment_reports_constant_score_days() -> None:

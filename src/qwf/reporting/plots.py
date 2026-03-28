@@ -164,12 +164,42 @@ def plot_ticker_contribution(
     _save(fig, out_path)
 
 
+def plot_benchmark_overlay(
+    benchmark_curves: pd.DataFrame,
+    *,
+    out_path: Path,
+    title: str,
+) -> None:
+    required_cols = ["date", "strategy_equity", "eq_universe_equity"]
+    missing = [col for col in required_cols if col not in benchmark_curves.columns]
+    if missing:
+        raise ValueError(f"Benchmark curves are missing required columns: {missing}")
+
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    curves = benchmark_curves.copy()
+    curves["date"] = pd.to_datetime(curves["date"])
+
+    ax.plot(curves["date"], curves["strategy_equity"], label="Strategy", linewidth=1.8)
+    ax.plot(curves["date"], curves["eq_universe_equity"], label="Equal-weight universe", linewidth=1.4)
+    if "spy_equity" in curves.columns and curves["spy_equity"].notna().any():
+        ax.plot(curves["date"], curves["spy_equity"], label="SPY buy-and-hold", linewidth=1.4)
+
+    ax.set_title(title)
+    ax.set_xlabel("Date")
+    ax.set_ylabel("Equity")
+    ax.grid(True)
+    ax.legend()
+    _save(fig, out_path)
+
+
 def save_xs_report_plots(
     portfolio_daily: pd.DataFrame,
     ic_daily: pd.DataFrame,
     spread_daily: pd.DataFrame,
     ticker_summary: pd.DataFrame,
     *,
+    benchmark_curves: pd.DataFrame | None = None,
     out_dir: str | Path,
     run_name: str,
     rolling_ic_window: int = 20,
@@ -189,6 +219,7 @@ def save_xs_report_plots(
         "drawdown": out_dir / "drawdown.png",
         "long_short_spread": out_dir / "long_short_spread.png",
         "ticker_contribution": out_dir / "ticker_contribution.png",
+        "benchmark_overlay": out_dir / "benchmark_overlay.png",
     }
 
     plot_equity(
@@ -225,6 +256,14 @@ def save_xs_report_plots(
         out_path=paths["ticker_contribution"],
         title=f"{run_name} - Total Contribution by Ticker",
     )
+    if benchmark_curves is not None:
+        plot_benchmark_overlay(
+            benchmark_curves,
+            out_path=paths["benchmark_overlay"],
+            title=f"{run_name} - Strategy vs Benchmarks",
+        )
+    else:
+        paths.pop("benchmark_overlay")
 
     return paths
 

@@ -555,3 +555,88 @@ def portfolio_perf_summary(
         "mean_cost": float(cost.mean()) if not cost.empty else np.nan,
         "n_traded_days": n_traded_days,
     }
+
+
+def build_xs_benchmark_curves(
+    predictions: pd.DataFrame,
+    portfolio_daily: pd.DataFrame,
+    *,
+    label_col: str,
+    date_col: str = "date",
+    ticker_col: str = "ticker",
+    strategy_equity_col: str = "equity",
+    spy_ticker: str = "SPY",
+) -> pd.DataFrame:
+    required_pred_cols = [date_col, ticker_col, label_col]
+    missing_pred = [col for col in required_pred_cols if col not in predictions.columns]
+    if missing_pred:
+        raise ValueError(f"Predictions are missing benchmark columns: {missing_pred}")
+
+    required_daily_cols = [date_col, strategy_equity_col]
+    missing_daily = [col for col in required_daily_cols if col not in portfolio_daily.columns]
+    if missing_daily:
+        raise ValueError(f"Portfolio daily is missing benchmark columns: {missing_daily}")
+
+    strategy = portfolio_daily[[date_col, strategy_equity_col]].copy()
+    strategy[date_col] = pd.to_datetime(strategy[date_col])
+    strategy = strategy.sort_values(date_col, kind="mergesort").reset_index(drop=True)
+    strategy_dates = pd.DatetimeIndex(strategy[date_col])
+
+    pred = predictions[[date_col, ticker_col, label_col]].copy()
+    pred[date_col] = pd.to_datetime(pred[date_col])
+    pred[label_col] = _to_float(pred[label_col])
+
+    eq_returns = pred.groupby(date_col, sort=True)[label_col].mean().reindex(strategy_dates)
+    spy_returns = (
+        pred.loc[pred[ticker_col] == spy_ticker]
+        .groupby(date_col, sort=True)[label_col]
+        .mean()
+        .reindex(strategy_dates)
+    )
+
+    curves = pd.DataFrame(
+        {
+            "date": strategy_dates,
+            "strategy_equity": _to_float(strategy[strategy_equity_col]).to_numpy(),
+            "eq_universe_return": eq_returns.to_numpy(),
+            "spy_return": spy_returns.to_numpy(),
+        }
+    )
+    curves["eq_universe_equity"] = equity_from_pnl(curves["eq_universe_return"].fillna(0.0), start_equity=1.0)
+
+    spy_valid = curves["spy_return"].notna().any()
+    if spy_valid:
+        curves["spy_equity"] = equity_from_pnl(curves["spy_return"].fillna(0.0), start_equity=1.0)
+    else:
+        curves["spy_equity"] = np.nan
+
+    return curves
+
+
+def benchmark_perf_summary(
+    benchmark_curves: pd.DataFrame,
+    *,
+    return_col: str,
+    prefix: str,
+) -> dict[str, float]:
+    if return_col not in benchmark_curves.columns:
+        raise ValueError(f"Benchmark curves are missing '{return_col}'")
+
+    returns = _to_float(benchmark_curves[return_col])
+    if returns.notna().sum() == 0:
+        return {
+            f"{prefix}_total_return": np.nan,
+            f"{prefix}_cagr": np.nan,
+            f"{prefix}_ann_vol": np.nan,
+            f"{prefix}_sharpe": np.nan,
+            f"{prefix}_max_drawdown": np.nan,
+        }
+
+    stats = perf_stats_from_pnl(returns.fillna(0.0))
+    return {
+        f"{prefix}_total_return": stats["total_return"],
+        f"{prefix}_cagr": stats["cagr"],
+        f"{prefix}_ann_vol": stats["ann_vol"],
+        f"{prefix}_sharpe": stats["sharpe"],
+        f"{prefix}_max_drawdown": stats["max_drawdown"],
+    }

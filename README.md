@@ -111,7 +111,7 @@ Example ETF report run with the stronger elasticnet-style baseline settings:
 python scripts/run_xs_model.py --input-dir scripts/data/real_etf_xs --run-name etf_xs_elasticnet_h3_v1 --model-name elasticnet --alpha 0.001 --l1-ratio 0.5 --label-horizon 3 --k 3 --score-normalization zscore --score-smoothing ema_3 --train-months 12 --test-months 3 --step-months 3 --start-date 2020-01-01
 ```
 
-Week-2 reporting now also writes richer diagnostics for the same run, including long-vs-short spread plots, rolling IC, drawdown, and a ticker summary table. For the sector ETF universe, the ticker summary is also a simple sector-level diagnostic. Degenerate constant-score dates are detected and skipped instead of being treated like normal ranked cross-sections.
+Week-2 reporting now also writes richer diagnostics for the same run, including long-vs-short spread plots, rolling IC, drawdown, a ticker summary table, and a benchmark overlay comparing strategy net equity against SPY buy-and-hold and an equal-weight long-only universe benchmark. For the sector ETF universe, the ticker summary is also a simple sector-level diagnostic. Degenerate constant-score dates are detected and skipped instead of being treated like normal ranked cross-sections.
 
 This is the first real-data validation workflow for week 2. It is intentionally not production data infrastructure.
 
@@ -181,9 +181,10 @@ outputs/
         drawdown.png
         long_short_spread.png
         ticker_contribution.png
+        benchmark_overlay.png
 ```
 
-`run_config.json` stores the run settings snapshot, including run type, timestamp, model settings, strategy settings, split settings, and the saved plan path. `outputs/run_registry.csv` is an append-only summary table across completed week-2 runs. Champion files under `outputs/champions/` are refreshed from the registry so winner configurations do not live only in memory or chat.
+`run_config.json` stores the run settings snapshot, including run type, timestamp, model settings, strategy settings, split settings, and the saved plan path. `outputs/run_registry.csv` is an append-only summary table across completed week-2 runs. Champion files under `outputs/champions/` are refreshed from the registry so winner configurations do not live only in memory or chat. Week-2 single-run summaries also include benchmark metrics for SPY and the equal-weight aligned universe when those curves are available.
 
 Week-2 single-run outputs include:
 
@@ -202,6 +203,7 @@ Week-2 single-run outputs include:
 - `plots/drawdown.png`
 - `plots/long_short_spread.png`
 - `plots/ticker_contribution.png`
+- `plots/benchmark_overlay.png`
 
 Ablation runs use the same per-run directory pattern and additionally write either `ablation_summary.csv` or `strategy_ablation_summary.csv`.
 
