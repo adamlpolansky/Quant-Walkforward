@@ -13,6 +13,15 @@ from qwf.experiments import run_cross_sectional_walkforward_experiment
 from qwf.features import DAILY_FEATURE_COLUMNS, make_daily_features
 from qwf.labels import add_forward_return_label
 from qwf.models import SUPPORTED_MODEL_NAMES
+from qwf.run_management import (
+    append_run_registry,
+    build_registry_row,
+    current_utc_timestamp,
+    init_run_paths,
+    save_plan_snapshot,
+    update_champion_files,
+    write_run_config,
+)
 from qwf.signals import SUPPORTED_SCORE_NORMALIZATIONS, SUPPORTED_SCORE_SMOOTHING
 from qwf.splits import make_global_walkforward_plan_from_dates
 
@@ -118,7 +127,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run a small week-2 cross-sectional model ablation grid.")
     parser.add_argument("--input-dir", type=Path, default=DEFAULT_INPUT_DIR, help="Directory with one daily CSV per ticker")
     parser.add_argument("--plan", type=Path, default=None, help="Optional global walk-forward plan CSV")
-    parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUT_DIR, help="Output directory")
+    parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUT_DIR, help="Output root directory")
     parser.add_argument("--run-name", type=str, default="etf_xs_ablation_v1", help="Prefix for summary outputs")
     parser.add_argument("--date-col", type=str, default="Date")
     parser.add_argument("--tickers", type=str, default=None, help="Optional comma-separated subset, for example SPY,QQQ")
@@ -152,7 +161,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 def main(argv: Sequence[str] | None = None) -> None:
     args = parse_args(argv)
-    args.out_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = current_utc_timestamp()
+    run_paths = init_run_paths(args.out_dir, args.run_name)
 
     panel = load_price_panel_from_directory(
         args.input_dir,
@@ -180,22 +190,22 @@ def main(argv: Sequence[str] | None = None) -> None:
     label_col = f"label_{args.label_horizon}d_fwd"
     panel = add_forward_return_label(panel, horizon=args.label_horizon, label_col=label_col)
 
-    plan_path = args.plan
-    if plan_path is None:
-        plan_path = args.out_dir / f"{args.run_name}_ablation_plan.csv"
+    plan_snapshot_path = run_paths.run_dir / "plan.csv"
+    if args.plan is None:
         plan = make_global_walkforward_plan_from_dates(
             panel["date"].drop_duplicates().sort_values(),
             train_months=args.train_months,
             test_months=args.test_months,
             step_months=args.step_months,
             start_date=args.start_date,
-            output_csv=plan_path,
+            output_csv=plan_snapshot_path,
         )
     else:
         plan = pd.read_csv(
-            plan_path,
+            args.plan,
             parse_dates=["train_start", "train_end", "test_start", "test_end"],
         )
+        save_plan_snapshot(plan, plan_snapshot_path)
 
     selected_model_names = _parse_model_names(args.model_names)
     specs = build_ablation_specs(
@@ -281,11 +291,75 @@ def main(argv: Sequence[str] | None = None) -> None:
     ]
     summary_df = summary_df[ordered_cols]
 
-    summary_path = args.out_dir / f"{args.run_name}_ablation_summary.csv"
+    summary_path = run_paths.run_dir / "ablation_summary.csv"
     summary_df.to_csv(summary_path, index=False)
+    config_path = write_run_config(
+        run_paths,
+        run_name=args.run_name,
+        run_type="ablation",
+        timestamp=timestamp,
+        input_dir=args.input_dir,
+        repo_root=ROOT,
+        config={
+            "model_names": selected_model_names,
+            "label_horizon": args.label_horizon,
+            "k": args.k,
+            "score_normalization": args.score_normalization,
+            "score_smoothing": args.score_smoothing,
+            "train_months": args.train_months,
+            "test_months": args.test_months,
+            "step_months": args.step_months,
+            "start_date": args.start_date,
+            "cost_bps_per_turnover": args.cost_bps_per_turnover,
+            "date_col": args.date_col,
+            "tickers": _parse_tickers(args.tickers),
+            "recursive": bool(args.recursive),
+            "ridge_alphas": _parse_float_list(args.ridge_alphas) if "ridge" in selected_model_names else [],
+            "lasso_alphas": _parse_float_list(args.lasso_alphas) if "lasso" in selected_model_names else [],
+            "elasticnet_alphas": _parse_float_list(args.elasticnet_alphas) if "elasticnet" in selected_model_names else [],
+            "elasticnet_l1_ratios": _parse_float_list(args.elasticnet_l1_ratios) if "elasticnet" in selected_model_names else [],
+            "plan_path": str(plan_snapshot_path),
+        },
+    )
+    registry_rows = [
+        build_registry_row(
+            timestamp=timestamp,
+            run_name=args.run_name,
+            run_type="ablation",
+            experiment_name=str(row["experiment_name"]),
+            path_to_run_dir=run_paths.run_dir,
+            model_name=str(row["model_name"]),
+            parameters=str(row["parameters"]),
+            horizon=int(row["horizon"]),
+            k=int(row["k"]),
+            normalization=str(row["normalization"]),
+            smoothing=str(row["smoothing"]),
+            mean_ic=float(row["mean_ic"]),
+            mean_spread=float(row["mean_spread"]),
+            total_return_net=float(row["total_return_net"]),
+            sharpe_net=float(row["sharpe_net"]),
+            sortino_net=float(row["sortino_net"]),
+            max_drawdown_net=float(row["max_drawdown_net"]),
+            n_constant_score_days=int(row["n_constant_score_days"]),
+        )
+        for row in summary_df.to_dict(orient="records")
+    ]
+    registry_path = append_run_registry(run_paths.registry_path, registry_rows)
+    champion_paths = update_champion_files(run_paths.registry_path, run_paths.champions_dir)
 
-    print(f"Saved ablation summary: {summary_path}")
-    print(f"Plan path: {plan_path}")
+    print(
+        "Run saved:\n"
+        f"- run dir: {run_paths.run_dir}\n"
+        f"- config: {config_path}\n"
+        f"- summary: {summary_path}\n"
+        f"- plan: {plan_snapshot_path}\n"
+        f"- registry: {registry_path}"
+    )
+    if champion_paths:
+        print(
+            "Champions updated:\n"
+            + "\n".join(f"- {path}" for path in champion_paths)
+        )
     print(
         "Top results by sharpe_net:\n"
         f"{summary_df.sort_values('sharpe_net', ascending=False).head(5).to_string(index=False)}"

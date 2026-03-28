@@ -183,12 +183,12 @@ def save_xs_report_plots(
     drawdown = metrics.drawdown_from_equity(equity)
 
     paths = {
-        "equity": out_dir / f"{run_name}_xs_equity.png",
-        "daily_ic": out_dir / f"{run_name}_daily_ic.png",
-        "rolling_ic": out_dir / f"{run_name}_rolling_ic.png",
-        "drawdown": out_dir / f"{run_name}_drawdown.png",
-        "long_short_spread": out_dir / f"{run_name}_long_short_spread.png",
-        "ticker_contribution": out_dir / f"{run_name}_ticker_contribution.png",
+        "equity": out_dir / "xs_equity.png",
+        "daily_ic": out_dir / "daily_ic.png",
+        "rolling_ic": out_dir / "rolling_ic.png",
+        "drawdown": out_dir / "drawdown.png",
+        "long_short_spread": out_dir / "long_short_spread.png",
+        "ticker_contribution": out_dir / "ticker_contribution.png",
     }
 
     plot_equity(

@@ -13,6 +13,15 @@ from qwf.labels import add_forward_return_label
 from qwf.models import SUPPORTED_MODEL_NAMES
 from qwf.portfolio import summarize_ticker_selection
 from qwf.reporting.plots import save_xs_report_plots
+from qwf.run_management import (
+    build_registry_row,
+    current_utc_timestamp,
+    init_run_paths,
+    append_run_registry,
+    save_plan_snapshot,
+    update_champion_files,
+    write_run_config,
+)
 from qwf.signals import SUPPORTED_SCORE_NORMALIZATIONS, SUPPORTED_SCORE_SMOOTHING
 from qwf.splits import make_global_walkforward_plan_from_dates
 
@@ -42,7 +51,7 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Run the week-2 cross-sectional baseline model.")
     p.add_argument("--input-dir", type=Path, default=default_input, help="Directory with one daily CSV per ticker")
     p.add_argument("--plan", type=Path, default=None, help="Optional global walk-forward plan CSV")
-    p.add_argument("--out-dir", type=Path, default=default_out, help="Output directory")
+    p.add_argument("--out-dir", type=Path, default=default_out, help="Output root directory")
     p.add_argument("--run-name", type=str, default="xs_ridge_1d_v1", help="Prefix for output files")
     p.add_argument("--date-col", type=str, default="Date")
     p.add_argument("--tickers", type=str, default=None, help="Optional comma-separated subset, for example SPY,QQQ,IWM")
@@ -69,8 +78,9 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    args.out_dir.mkdir(parents=True, exist_ok=True)
     model_params = _build_model_params(args)
+    timestamp = current_utc_timestamp()
+    run_paths = init_run_paths(args.out_dir, args.run_name)
 
     panel = load_price_panel_from_directory(
         args.input_dir,
@@ -98,22 +108,22 @@ def main() -> None:
     label_col = f"label_{args.label_horizon}d_fwd"
     panel = add_forward_return_label(panel, horizon=args.label_horizon, label_col=label_col)
 
-    plan_path = args.plan
-    if plan_path is None:
-        plan_path = args.out_dir / f"{args.run_name}_auto_plan.csv"
+    plan_snapshot_path = run_paths.run_dir / "plan.csv"
+    if args.plan is None:
         plan = make_global_walkforward_plan_from_dates(
             panel["date"].drop_duplicates().sort_values(),
             train_months=args.train_months,
             test_months=args.test_months,
             step_months=args.step_months,
             start_date=args.start_date,
-            output_csv=plan_path,
+            output_csv=plan_snapshot_path,
         )
     else:
         plan = pd.read_csv(
-            plan_path,
+            args.plan,
             parse_dates=["train_start", "train_end", "test_start", "test_end"],
         )
+        save_plan_snapshot(plan, plan_snapshot_path)
 
     results = run_cross_sectional_walkforward_experiment(
         panel,
@@ -138,16 +148,16 @@ def main() -> None:
     summary = dict(results["summary"])
     summary["date_start"] = str(panel["date"].min().date())
     summary["date_end"] = str(panel["date"].max().date())
-    summary["plan_path"] = str(plan_path)
+    summary["plan_path"] = str(plan_snapshot_path)
     ticker_summary = summarize_ticker_selection(portfolio_detail, score_col=summary["score_col"])
 
-    pred_path = args.out_dir / f"{args.run_name}_predictions.csv"
-    detail_path = args.out_dir / f"{args.run_name}_portfolio_detail.csv"
-    daily_path = args.out_dir / f"{args.run_name}_portfolio_daily.csv"
-    ic_path = args.out_dir / f"{args.run_name}_ic_daily.csv"
-    spread_path = args.out_dir / f"{args.run_name}_spread_daily.csv"
-    ticker_summary_path = args.out_dir / f"{args.run_name}_ticker_summary.csv"
-    summary_path = args.out_dir / f"{args.run_name}_xs_summary.json"
+    pred_path = run_paths.run_dir / "predictions.csv"
+    detail_path = run_paths.run_dir / "portfolio_detail.csv"
+    daily_path = run_paths.run_dir / "portfolio_daily.csv"
+    ic_path = run_paths.run_dir / "ic_daily.csv"
+    spread_path = run_paths.run_dir / "spread_daily.csv"
+    ticker_summary_path = run_paths.run_dir / "ticker_summary.csv"
+    summary_path = run_paths.run_dir / "xs_summary.json"
 
     predictions.to_csv(pred_path, index=False)
     portfolio_detail.to_csv(detail_path, index=False)
@@ -156,14 +166,63 @@ def main() -> None:
     spread_daily.to_csv(spread_path, index=False)
     ticker_summary.to_csv(ticker_summary_path, index=False)
     summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    config_path = write_run_config(
+        run_paths,
+        run_name=args.run_name,
+        run_type="single_run",
+        timestamp=timestamp,
+        input_dir=args.input_dir,
+        repo_root=ROOT,
+        config={
+            "model_name": args.model_name,
+            "model_params": model_params,
+            "label_horizon": args.label_horizon,
+            "k": args.k,
+            "score_normalization": args.score_normalization,
+            "score_smoothing": args.score_smoothing,
+            "train_months": args.train_months,
+            "test_months": args.test_months,
+            "step_months": args.step_months,
+            "start_date": args.start_date,
+            "cost_bps_per_turnover": args.cost_bps_per_turnover,
+            "date_col": args.date_col,
+            "tickers": _parse_tickers(args.tickers),
+            "recursive": bool(args.recursive),
+            "plan_path": str(plan_snapshot_path),
+        },
+    )
+    registry_path = append_run_registry(
+        run_paths.registry_path,
+        [
+            build_registry_row(
+                timestamp=timestamp,
+                run_name=args.run_name,
+                run_type="single_run",
+                path_to_run_dir=run_paths.run_dir,
+                model_name=summary["model_name"],
+                parameters=summary["model_params"],
+                horizon=summary["label_horizon"],
+                k=summary["k"],
+                normalization=summary["score_normalization"],
+                smoothing=summary["score_smoothing"],
+                mean_ic=summary["mean_ic"],
+                mean_spread=summary["mean_spread"],
+                total_return_net=summary["total_return_net"],
+                sharpe_net=summary["sharpe_net"],
+                sortino_net=summary["sortino_net"],
+                max_drawdown_net=summary["max_drawdown_net"],
+                n_constant_score_days=summary["n_constant_score_days"],
+            )
+        ],
+    )
+    champion_paths = update_champion_files(run_paths.registry_path, run_paths.champions_dir)
 
-    plots_dir = args.out_dir / "plots"
     plot_paths = save_xs_report_plots(
         portfolio_daily,
         ic_daily,
         spread_daily,
         ticker_summary,
-        out_dir=plots_dir,
+        out_dir=run_paths.plots_dir,
         run_name=args.run_name,
     )
     best_ticker = ticker_summary.iloc[0]
@@ -174,14 +233,21 @@ def main() -> None:
         )
 
     print(
-        "Saved:\n"
+        "Run saved:\n"
+        f"- run dir: {run_paths.run_dir}\n"
+        f"- config: {config_path}\n"
+        f"- registry: {registry_path}\n"
+        f"- summary: {summary_path}"
+    )
+    print(
+        "Files saved:\n"
         f"- {pred_path}\n"
         f"- {detail_path}\n"
         f"- {daily_path}\n"
         f"- {ic_path}\n"
         f"- {spread_path}\n"
         f"- {ticker_summary_path}\n"
-        f"- {summary_path}"
+        f"- {plan_snapshot_path}"
     )
     print(
         "Plots saved:\n"
@@ -192,6 +258,11 @@ def main() -> None:
         f"- {plot_paths['long_short_spread']}\n"
         f"- {plot_paths['ticker_contribution']}"
     )
+    if champion_paths:
+        print(
+            "Champions updated:\n"
+            + "\n".join(f"- {path}" for path in champion_paths)
+        )
     print(
         "Run summary:\n"
         f"- model: {summary['model_name']}\n"

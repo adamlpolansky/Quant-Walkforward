@@ -44,6 +44,7 @@ def test_run_xs_ablation_writes_summary_csv(tmp_path: Path) -> None:
     data_dir = tmp_path / "demo_xs"
     out_dir = tmp_path / "outputs"
     run_name = "ablation_test"
+    run_dir = out_dir / "runs" / run_name
     _write_synthetic_xs_directory(data_dir)
 
     subprocess.run(
@@ -77,18 +78,31 @@ def test_run_xs_ablation_writes_summary_csv(tmp_path: Path) -> None:
         text=True,
     )
 
-    summary_path = out_dir / f"{run_name}_ablation_summary.csv"
+    summary_path = run_dir / "ablation_summary.csv"
+    config_path = run_dir / "run_config.json"
+    registry_path = out_dir / "run_registry.csv"
     summary_df = pd.read_csv(summary_path)
+    registry_df = pd.read_csv(registry_path)
 
     assert summary_path.exists()
+    assert config_path.exists()
+    assert (run_dir / "plan.csv").exists()
+    assert registry_path.exists()
     assert len(summary_df) == 2
     assert set(summary_df["model_name"]) == {"linear", "ridge"}
+    assert (registry_df["run_name"] == run_name).sum() == 2
+    assert (registry_df["run_type"] == "ablation").any()
     assert set(
         [
             "model_name",
             "parameters",
+            "horizon",
+            "k",
+            "normalization",
+            "smoothing",
             "n_tickers",
             "n_traded_days",
+            "n_constant_score_days",
             "mean_ic",
             "ic_ir",
             "mean_spread",

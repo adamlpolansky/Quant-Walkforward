@@ -115,6 +115,7 @@ def test_week2_demo_scripts_run_end_to_end_without_network(tmp_path: Path) -> No
     data_dir = tmp_path / "demo_xs"
     out_dir = tmp_path / "outputs"
     run_name = "demo_xs_test"
+    run_dir = out_dir / "runs" / run_name
 
     subprocess.run(
         [
@@ -162,25 +163,33 @@ def test_week2_demo_scripts_run_end_to_end_without_network(tmp_path: Path) -> No
         text=True,
     )
 
-    summary_path = out_dir / f"{run_name}_xs_summary.json"
-    ticker_summary_path = out_dir / f"{run_name}_ticker_summary.csv"
+    summary_path = run_dir / "xs_summary.json"
+    ticker_summary_path = run_dir / "ticker_summary.csv"
+    config_path = run_dir / "run_config.json"
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
     ticker_summary = pd.read_csv(ticker_summary_path)
+    registry = pd.read_csv(out_dir / "run_registry.csv")
 
-    assert (out_dir / f"{run_name}_auto_plan.csv").exists()
-    assert (out_dir / f"{run_name}_predictions.csv").exists()
-    assert (out_dir / f"{run_name}_portfolio_detail.csv").exists()
-    assert (out_dir / f"{run_name}_portfolio_daily.csv").exists()
-    assert (out_dir / f"{run_name}_ic_daily.csv").exists()
-    assert (out_dir / f"{run_name}_spread_daily.csv").exists()
+    assert run_dir.exists()
+    assert (run_dir / "plan.csv").exists()
+    assert (run_dir / "predictions.csv").exists()
+    assert (run_dir / "portfolio_detail.csv").exists()
+    assert (run_dir / "portfolio_daily.csv").exists()
+    assert (run_dir / "ic_daily.csv").exists()
+    assert (run_dir / "spread_daily.csv").exists()
     assert ticker_summary_path.exists()
     assert summary_path.exists()
-    assert (out_dir / "plots" / f"{run_name}_xs_equity.png").exists()
-    assert (out_dir / "plots" / f"{run_name}_daily_ic.png").exists()
-    assert (out_dir / "plots" / f"{run_name}_rolling_ic.png").exists()
-    assert (out_dir / "plots" / f"{run_name}_drawdown.png").exists()
-    assert (out_dir / "plots" / f"{run_name}_long_short_spread.png").exists()
-    assert (out_dir / "plots" / f"{run_name}_ticker_contribution.png").exists()
+    assert config_path.exists()
+    assert (run_dir / "plots" / "xs_equity.png").exists()
+    assert (run_dir / "plots" / "daily_ic.png").exists()
+    assert (run_dir / "plots" / "rolling_ic.png").exists()
+    assert (run_dir / "plots" / "drawdown.png").exists()
+    assert (run_dir / "plots" / "long_short_spread.png").exists()
+    assert (run_dir / "plots" / "ticker_contribution.png").exists()
+    assert (out_dir / "champions" / "best_by_sharpe.json").exists()
+    assert (out_dir / "champions" / "best_by_sortino.json").exists()
+    assert (out_dir / "champions" / "best_by_mean_ic.json").exists()
+    assert (out_dir / "champions" / "current_etf_xs_champion.json").exists()
 
     assert summary["n_tickers"] == 6
     assert summary["n_folds"] >= 1
@@ -199,6 +208,8 @@ def test_week2_demo_scripts_run_end_to_end_without_network(tmp_path: Path) -> No
     assert summary["score_normalization"] == "none"
     assert summary["score_smoothing"] == "none"
     assert summary["n_constant_score_days"] == 0
+    assert set(["run_name", "run_type", "path_to_run_dir"]).issubset(registry.columns)
+    assert (registry["run_name"] == run_name).any()
 
 
 def test_run_cross_sectional_walkforward_experiment_reports_constant_score_days() -> None:

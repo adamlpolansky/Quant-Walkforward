@@ -44,6 +44,7 @@ def test_run_xs_strategy_ablation_writes_summary_csv(tmp_path: Path) -> None:
     data_dir = tmp_path / "demo_xs"
     out_dir = tmp_path / "outputs"
     run_name = "strategy_ablation_test"
+    run_dir = out_dir / "runs" / run_name
     _write_synthetic_xs_directory(data_dir)
 
     subprocess.run(
@@ -81,14 +82,26 @@ def test_run_xs_strategy_ablation_writes_summary_csv(tmp_path: Path) -> None:
         text=True,
     )
 
-    summary_path = out_dir / f"{run_name}_strategy_ablation_summary.csv"
+    summary_path = run_dir / "strategy_ablation_summary.csv"
+    config_path = run_dir / "run_config.json"
+    registry_path = out_dir / "run_registry.csv"
     summary_df = pd.read_csv(summary_path)
+    registry_df = pd.read_csv(registry_path)
 
     assert summary_path.exists()
+    assert config_path.exists()
+    assert (run_dir / "plan.csv").exists()
+    assert registry_path.exists()
+    assert (out_dir / "champions" / "best_by_sharpe.json").exists()
+    assert (out_dir / "champions" / "best_by_sortino.json").exists()
+    assert (out_dir / "champions" / "best_by_mean_ic.json").exists()
+    assert (out_dir / "champions" / "current_etf_xs_champion.json").exists()
     assert len(summary_df) == 4
     assert set(summary_df["model_name"]) == {"linear"}
     assert set(summary_df["horizon"]) == {1, 3}
     assert set(summary_df["normalization"]) == {"none", "rank_to_minus1_plus1"}
+    assert (registry_df["run_name"] == run_name).sum() == 4
+    assert (registry_df["run_type"] == "strategy_ablation").any()
     assert set(
         [
             "parameters",

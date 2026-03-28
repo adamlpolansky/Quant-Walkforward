@@ -149,21 +149,61 @@ This is still a controlled week-2 baseline enhancement pass, not advanced optimi
 
 If `--plan` is omitted, `scripts/run_xs_model.py` builds a global plan automatically from the intersected panel calendar and saves it alongside the other outputs.
 
-Week-2 outputs include:
+## Week-2 run management
 
-- `<run_name>_predictions.csv`
-- `<run_name>_portfolio_detail.csv`
-- `<run_name>_portfolio_daily.csv`
-- `<run_name>_ic_daily.csv`
-- `<run_name>_spread_daily.csv`
-- `<run_name>_ticker_summary.csv`
-- `<run_name>_xs_summary.json`
-- `outputs/plots/<run_name>_xs_equity.png`
-- `outputs/plots/<run_name>_daily_ic.png`
-- `outputs/plots/<run_name>_rolling_ic.png`
-- `outputs/plots/<run_name>_drawdown.png`
-- `outputs/plots/<run_name>_long_short_spread.png`
-- `outputs/plots/<run_name>_ticker_contribution.png`
+Week-2 scripts now save into per-run directories under `outputs/runs/<run_name>/`. The scripts recreate the full output tree automatically if `outputs/` does not exist.
+
+Example layout:
+
+```text
+outputs/
+  run_registry.csv
+  champions/
+    current_etf_xs_champion.json
+    best_by_sharpe.json
+    best_by_sortino.json
+    best_by_mean_ic.json
+  runs/
+    etf_xs_v1/
+      run_config.json
+      xs_summary.json
+      predictions.csv
+      portfolio_detail.csv
+      portfolio_daily.csv
+      ic_daily.csv
+      spread_daily.csv
+      ticker_summary.csv
+      plan.csv
+      plots/
+        xs_equity.png
+        daily_ic.png
+        rolling_ic.png
+        drawdown.png
+        long_short_spread.png
+        ticker_contribution.png
+```
+
+`run_config.json` stores the run settings snapshot, including run type, timestamp, model settings, strategy settings, split settings, and the saved plan path. `outputs/run_registry.csv` is an append-only summary table across completed week-2 runs. Champion files under `outputs/champions/` are refreshed from the registry so winner configurations do not live only in memory or chat.
+
+Week-2 single-run outputs include:
+
+- `predictions.csv`
+- `portfolio_detail.csv`
+- `portfolio_daily.csv`
+- `ic_daily.csv`
+- `spread_daily.csv`
+- `ticker_summary.csv`
+- `xs_summary.json`
+- `plan.csv`
+- `run_config.json`
+- `plots/xs_equity.png`
+- `plots/daily_ic.png`
+- `plots/rolling_ic.png`
+- `plots/drawdown.png`
+- `plots/long_short_spread.png`
+- `plots/ticker_contribution.png`
+
+Ablation runs use the same per-run directory pattern and additionally write either `ablation_summary.csv` or `strategy_ablation_summary.csv`.
 
 Week-2 summary metrics include:
 
